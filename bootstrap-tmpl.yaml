@@ -1,0 +1,11 @@
+# Written by Vortex when this repository was bootstrapped from a boilerplate
+# template. It records what this app STARTED as — not what it is now, and not
+# how far it has since diverged. Do not hand-edit: Vortex rewrites this file
+# whenever a template is applied.
+bootstrapTemplate:
+  forge: 'github'
+  repo: 'cognizhi/vortex-boilerplate-ts-reactjs-vite-tailwindcss'
+  sha: 'b919022a97f15a9d810e27323dcce6878f37303b'
+  stack: 'ts-reactjs-vite-tailwindcss'
+  method: 'generate'
+  appliedAt: '2026-09-18T16:23:45.566Z'
