@@ -1,0 +1,4 @@
+# bun, not npm — agent containers (and this project's runner generally) are
+# npm-free, and `npm run lint-staged` there fails the hook with "npm: not
+# found", training agents to commit with --no-verify and skip the gate.
+bun x lint-staged --concurrent false

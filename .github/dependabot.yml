@@ -1,0 +1,27 @@
+# To get started with Dependabot version updates, you'll need to specify which
+# package ecosystems to update and where the package manifests are located.
+# Please see the documentation for all configuration options:
+# https://docs.github.com/github/administering-a-repository/configuration-options-for-dependency-updates
+
+version: 2
+updates:
+  - package-ecosystem: "npm" # See documentation for possible values
+    directory: "/" # Location of package manifests
+    schedule:
+      interval: "weekly"
+    ignore:
+      # typescript-eslint (and @typescript-eslint/*) cap their peer range at
+      # `typescript <6.1.0` — see https://github.com/typescript-eslint/typescript-eslint.
+      # A major bump here breaks `npm install` with an unresolved ERESOLVE peer
+      # conflict until typescript-eslint adds TS 6/7 support. Revisit by removing
+      # this ignore once that support lands.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      # prettier-plugin-tailwindcss 0.8.0/0.8.1 crash prettier on this repo's
+      # config with "TypeError: e.charAt is not a function" / "a.startsWith
+      # is not a function" while parsing any .ts/.js file (reproduces even on
+      # files with no Tailwind classes) — breaks the husky pre-commit hook
+      # entirely. Verified 0.7.4 works, 0.8.0+ doesn't. Revisit by removing
+      # this ignore once a 0.8.x+ release fixes it.
+      - dependency-name: "prettier-plugin-tailwindcss"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]

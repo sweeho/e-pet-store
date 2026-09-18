@@ -1,0 +1,53 @@
+# CI for the boilerplate ITSELF.
+#
+# This template ships four test tiers but, until this workflow existed, ran
+# none of them — so a defect in the harness could sit here indefinitely and be
+# inherited by every project generated from the template. That is not
+# hypothetical: the Playwright dev server was started in a way that silently
+# ran it under node instead of Bun, which broke every `bun:sqlite`-backed route
+# while leaving the static pages green. It shipped, and was only found weeks
+# later in a downstream project that had added CI of its own.
+#
+# Generated repositories inherit this file, so it is also the starting CI for
+# every new project.
+name: CI
+
+on:
+  push:
+    branches: ["vortex/**", dev, main]
+  pull_request:
+    branches: ["vortex/**", dev, main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Doc links
+        run: node scripts/check-doc-links.mjs
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Unit and integration tests
+        run: bun run test
+
+      - name: Build
+        run: bun run build
+
+      - name: Install Playwright's Chromium
+        run: bunx playwright install --with-deps chromium
+
+      - name: E2E tests
+        run: bun run test:e2e

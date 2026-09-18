@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    "outDir": "./node_modules/.cache/tsc-node",
+    "skipLibCheck": true,
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowSyntheticDefaultImports": true,
+    "strict": true
+  },
+  "include": [
+    "vite.config.ts",
+    "vitest.config.ts",
+    "playwright.config.ts",
+    "drizzle.config.ts",
+    "configs",
+    "server.ts",
+    "routes",
+    "middleware",
+    "db",
+    "e2e"
+  ]
+}

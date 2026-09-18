@@ -1,0 +1,86 @@
+# Vortex project configuration.
+#
+# Two things live here, and both feed an agent's composed prompt directly.
+
+# This project has CONSOLIDATED its agent instructions: AGENTS.md is the single
+# authored manual, and CLAUDE.md / GEMINI.md are symlinks to it. Declaring this is
+# what makes `settingSources: []` safe — Vortex composes the manual section-scoped
+# into the project layer, so letting a harness auto-load it as well would deliver
+# the same document twice.
+instructions:
+  source: AGENTS.md
+
+# Project command contract — tier 2.
+#
+# How THIS project installs, builds, tests and validates itself. Slots not listed
+# fall through to the `ts-reactjs-vite-tailwindcss` stack defaults in the Vortex
+# bundle, and then to `unresolved` — which agents report rather than guessing
+# around. The resolved table reaches every agent's prompt under
+# `## Project commands`, for every harness.
+#
+# This is the canonical binding. AGENTS.md explains the non-obvious ones; it does
+# not restate the table.
+commands:
+  install: { command: bun install }
+  build:
+    command: bun run build
+    notes: >-
+      `tsc --build && vite build`. A prebuild hook generates `auto-imports.d.ts`,
+      which does not exist on a fresh clone.
+  start:
+    command: bun run dev
+    notes: Vite dev server on :5000. Playwright uses :5178 so the two never collide.
+  check-types:
+    command: bun run typecheck
+    notes: >-
+      `tsc --build`, not `tsc --noEmit` — `tsconfig.node.json` is `composite: true`
+      and cannot set `noEmit`. A pretypecheck hook generates `auto-imports.d.ts`
+      first; give any new tsc-only script the same hook.
+  check-lint: { command: bun run lint }
+  test-unit:
+    command: bun run test
+    notes: >-
+      `bun --bun vitest run`, never plain `vitest` — `db/client.ts` imports the
+      `bun:sqlite` builtin, and Vitest's worker pool otherwise spawns real Node
+      children that cannot resolve it.
+  test-e2e:
+    command: bun run test:e2e
+    notes: >-
+      Playwright. A preflight fails fast with a clear message when Chromium is
+      genuinely missing — do NOT retry or try to install a browser.
+  test-smoke:
+    command: bun run test:smoke
+    notes: One spec (e2e/smoke.spec.ts) — the app loads and the home heading renders.
+  verify:
+    command: bun run verify
+    notes: The browser-free core gate — lint + typecheck + unit. Safe in any environment.
+  verify-full:
+    command: bun run verify:full
+    notes: >-
+      `verify` plus the E2E tier. Prefer this: every environment this template
+      targets (agent workspace containers, CI, local dev) ships a Chromium.
+  extra:
+    doc-links:
+      command: node scripts/check-doc-links.mjs
+      description: >-
+        Fail on a relative markdown link whose target file is missing. Exists because
+        renaming a root doc silently breaks every link to it, across files, invisibly.
+    db-generate:
+      command: bun run db:generate
+      description: Regenerate the drizzle migrations in drizzle/ from the schema
+    db-studio:
+      command: bun run db:studio
+      description: Open drizzle studio against the local sqlite.db
+
+# Spec-driven development (OpenSpec). Every sprint on this project — an idea sprint
+# of any kind, and an idea-less batch of defect tickets alike — produces one
+# validated OpenSpec change: a proposal, delta specs whose `#### Scenario:` blocks
+# become the ticket acceptance criteria and the QA test oracle, and a `tasks.md` the
+# platform ticks as each ticket merges. Completed changes are archived into
+# `openspec/specs/` at sprint close, which is the durable, per-capability spec of
+# record.
+#
+# `openspec/` is provisioned on the first spec-driven sprint; nothing to set up here.
+# Turn this off and the project runs a byte-identical pipeline without any of it.
+specDriven:
+  enabled: true
