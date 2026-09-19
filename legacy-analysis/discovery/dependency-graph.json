@@ -1,0 +1,299 @@
+{
+  "version": "1.0",
+  "timestamp": "2026-09-19",
+  "application": "petstore-1.3.2",
+  "framework": "J2EE",
+  "summary": {
+    "total_modules": 22,
+    "total_edges": 58,
+    "high_risk_modules": 7,
+    "app_modules": 4,
+    "component_modules": 18,
+    "critical_path": [
+      "apps/petstore -> (cart, catalog, purchaseorder, customer, signon) -> components/*"
+    ],
+    "bottleneck_modules": [
+      "components/servicelocator",
+      "components/xmldocuments",
+      "components/contactinfo"
+    ]
+  },
+  "modules": [
+    {
+      "id": "apps/petstore",
+      "name": "petstore",
+      "type": "app",
+      "loc": 14241,
+      "screens": 67,
+      "risk": "high",
+      "score": 10,
+      "depends_on": [
+        "components/address",
+        "components/asyncsender",
+        "components/cart",
+        "components/catalog",
+        "components/contactinfo",
+        "components/creditcard",
+        "components/customer",
+        "components/lineitem",
+        "components/purchaseorder",
+        "components/servicelocator",
+        "components/signon",
+        "components/uidgen",
+        "components/util",
+        "components/xmldocuments"
+      ]
+    },
+    {
+      "id": "apps/admin",
+      "name": "admin",
+      "type": "app",
+      "loc": 5012,
+      "screens": 4,
+      "risk": "high",
+      "score": 8,
+      "depends_on": [
+        "apps/opc",
+        "components/asyncsender",
+        "components/servicelocator",
+        "components/xmldocuments"
+      ]
+    },
+    {
+      "id": "apps/opc",
+      "name": "opc",
+      "type": "app",
+      "loc": 3174,
+      "screens": 1,
+      "risk": "high",
+      "score": 8,
+      "description": "Order Processing Center - workflow and approval logic",
+      "depends_on": [
+        "components/address",
+        "components/contactinfo",
+        "components/lineitem",
+        "components/mailer",
+        "components/processmanager",
+        "components/purchaseorder",
+        "components/servicelocator",
+        "components/xmldocuments"
+      ]
+    },
+    {
+      "id": "apps/supplier",
+      "name": "supplier",
+      "type": "app",
+      "loc": 2793,
+      "screens": 7,
+      "risk": "high",
+      "score": 7,
+      "depends_on": [
+        "components/lineitem",
+        "components/processmanager",
+        "components/servicelocator",
+        "components/supplierpo",
+        "components/xmldocuments"
+      ]
+    },
+    {
+      "id": "components/catalog",
+      "name": "catalog",
+      "type": "component",
+      "loc": 2521,
+      "screens": 0,
+      "risk": "high",
+      "score": 7,
+      "depends_on": ["components/servicelocator", "components/util"]
+    },
+    {
+      "id": "components/purchaseorder",
+      "name": "purchaseorder",
+      "type": "component",
+      "loc": 949,
+      "screens": 0,
+      "risk": "high",
+      "score": 7,
+      "depends_on": [
+        "components/address",
+        "components/contactinfo",
+        "components/creditcard",
+        "components/lineitem",
+        "components/servicelocator",
+        "components/xmldocuments"
+      ]
+    },
+    {
+      "id": "components/xmldocuments",
+      "name": "xmldocuments",
+      "type": "component",
+      "loc": 1932,
+      "screens": 0,
+      "risk": "medium",
+      "score": 6,
+      "description": "XML document generation and processing",
+      "depends_on": []
+    },
+    {
+      "id": "components/processmanager",
+      "name": "processmanager",
+      "type": "component",
+      "loc": 785,
+      "screens": 0,
+      "risk": "medium",
+      "score": 6,
+      "description": "State machine for order workflow and approval",
+      "depends_on": []
+    },
+    {
+      "id": "components/signon",
+      "name": "signon",
+      "type": "component",
+      "loc": 1047,
+      "screens": 0,
+      "risk": "medium",
+      "score": 5,
+      "depends_on": []
+    },
+    {
+      "id": "components/customer",
+      "name": "customer",
+      "type": "component",
+      "loc": 724,
+      "screens": 0,
+      "risk": "medium",
+      "score": 5,
+      "depends_on": ["components/contactinfo", "components/creditcard"]
+    },
+    {
+      "id": "components/supplierpo",
+      "name": "supplierpo",
+      "type": "component",
+      "loc": 759,
+      "screens": 0,
+      "risk": "medium",
+      "score": 5,
+      "depends_on": [
+        "components/address",
+        "components/contactinfo",
+        "components/lineitem",
+        "components/servicelocator",
+        "components/xmldocuments"
+      ]
+    },
+    {
+      "id": "components/mailer",
+      "name": "mailer",
+      "type": "component",
+      "loc": 593,
+      "screens": 0,
+      "risk": "medium",
+      "score": 3,
+      "depends_on": ["components/xmldocuments"]
+    },
+    {
+      "id": "components/contactinfo",
+      "name": "contactinfo",
+      "type": "component",
+      "loc": 498,
+      "screens": 0,
+      "risk": "medium",
+      "score": 3,
+      "description": "Customer contact information (address references)",
+      "depends_on": ["components/address", "components/servicelocator", "components/xmldocuments"]
+    },
+    {
+      "id": "components/address",
+      "name": "address",
+      "type": "component",
+      "loc": 438,
+      "screens": 0,
+      "risk": "medium",
+      "score": 3,
+      "depends_on": ["components/xmldocuments"]
+    },
+    {
+      "id": "components/cart",
+      "name": "cart",
+      "type": "component",
+      "loc": 494,
+      "screens": 0,
+      "risk": "medium",
+      "score": 4,
+      "depends_on": ["components/catalog", "components/util"]
+    },
+    {
+      "id": "components/lineitem",
+      "name": "lineitem",
+      "type": "component",
+      "loc": 477,
+      "screens": 0,
+      "risk": "medium",
+      "score": 4,
+      "depends_on": ["components/xmldocuments"]
+    },
+    {
+      "id": "components/creditcard",
+      "name": "creditcard",
+      "type": "component",
+      "loc": 368,
+      "screens": 0,
+      "risk": "medium",
+      "score": 3,
+      "depends_on": ["components/xmldocuments"]
+    },
+    {
+      "id": "components/servicelocator",
+      "name": "servicelocator",
+      "type": "component",
+      "loc": 658,
+      "screens": 0,
+      "risk": "low",
+      "score": 2,
+      "description": "JNDI service locator for EJB lookups",
+      "depends_on": []
+    },
+    {
+      "id": "components/uidgen",
+      "name": "uidgen",
+      "type": "component",
+      "loc": 360,
+      "screens": 0,
+      "risk": "low",
+      "score": 2,
+      "description": "Unique ID generator (likely for order/item IDs)",
+      "depends_on": []
+    },
+    {
+      "id": "components/asyncsender",
+      "name": "asyncsender",
+      "type": "component",
+      "loc": 263,
+      "screens": 0,
+      "risk": "low",
+      "score": 2,
+      "description": "Asynchronous message handling via JMS",
+      "depends_on": ["components/servicelocator"]
+    },
+    {
+      "id": "components/util",
+      "name": "util",
+      "type": "component",
+      "loc": 80,
+      "screens": 0,
+      "risk": "low",
+      "score": 1,
+      "depends_on": []
+    },
+    {
+      "id": "components/encodingfilter",
+      "name": "encodingfilter",
+      "type": "component",
+      "loc": 80,
+      "screens": 0,
+      "risk": "low",
+      "score": 1,
+      "description": "HTTP request encoding filter for UTF-8",
+      "depends_on": []
+    }
+  ]
+}

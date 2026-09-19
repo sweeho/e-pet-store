@@ -1,0 +1,12 @@
+capability_key,name,summary
+catalog-search,Catalog & Search,Product browsing, search, and catalog management
+shopping-cart,Shopping Cart,Item selection, cart management, and quantity handling
+customer-account,Customer Account,User registration, authentication, profile management, and account settings
+order-creation,Order Creation,Order placement, line item management, and order assembly
+order-approval,Order Approval,Order workflow, approval thresholds, and status management
+order-fulfillment,Order Fulfillment,Purchase order processing and supplier coordination
+payment-processing,Payment Processing,Credit card validation, acceptance rules, and payment handling
+customer-contact,Customer Contact,Address and contact information management
+notifications,Notifications,Email notifications and asynchronous message handling
+supplier-portal,Supplier Portal,Supplier order management and supplier-specific operations
+admin-operations,Admin Operations,Administrative functions and system configuration
