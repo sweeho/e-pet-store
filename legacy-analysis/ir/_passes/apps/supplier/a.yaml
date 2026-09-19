@@ -1,0 +1,945 @@
+records:
+  - record_key: ORD-REQU-0001
+    kind: requirement
+    capability_key: order-fulfillment
+    requirement: >
+      The system SHALL persist a purchase order from XML into persistent storage
+      when the supplier receives a purchase order message.
+    confidence: high
+    confidence_basis: >
+      Observed in OrderFulfillmentFacadeEJB.processPO() which creates a
+      SupplierOrderLocal entity from XML input. Both passes can verify at
+      the entity level and in code paths that call processPO.
+    risk_class: operational
+    basis: >
+      OrderFulfillmentFacadeEJB.processPO() creates a SupplierOrderLocal by calling
+      supplierOrderLocalHome.create(supplierOrder) after deserializing the XML. The
+      entity is then used in subsequent fulfillment logic, confirming persistence.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/supplier/src/com/sun/j2ee/blueprints/supplier/orderfulfillment/ejb/OrderFulfillmentFacadeEJB.java
+        line_start: 223
+        line_end: 236
+        excerpt: |
+          public String processPO(String poXmlDoc) throws CreateException,
+              XMLDocumentException {
+            String invoiceXml = null;
+            SupplierOrderLocal order = null;
+
+            // Convert Po in XML to PO as Java Obj
+            SupplierOrder supplierOrder = null;
+            supplierOrderXDE.setDocument(poXmlDoc);
+            supplierOrder = supplierOrderXDE.getSupplierOrder();
+            //persist order
+            order = supplierOrderLocalHome.create(supplierOrder);
+            //fullfil order
+            invoiceXml = processAnOrder(order);
+            return invoiceXml;
+          }
+    stack_metadata:
+      ejb.bean: OrderFulfillmentFacadeEJB
+      ejb.transaction: Required
+      framework: J2EE EJB
+
+  - record_key: ORD-REQU-0002
+    kind: requirement
+    capability_key: order-fulfillment
+    requirement: >
+      GIVEN a purchase order with line items, WHEN the supplier checks inventory,
+      THEN the system SHALL verify that available quantity is at least equal to
+      the required quantity for each item.
+    confidence: high
+    confidence_basis: >
+      The checkInventory method directly compares inv.getQuantity() < item.getQuantity()
+      and returns false if insufficient. Both passes can verify from InventoryEJB CMP
+      fields and code logic.
+    risk_class: operational
+    basis: >
+      OrderFulfillmentFacadeEJB.checkInventory() method at line 129 checks
+      "if(inv.getQuantity() < item.getQuantity()) return(false)" explicitly.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/supplier/src/com/sun/j2ee/blueprints/supplier/orderfulfillment/ejb/OrderFulfillmentFacadeEJB.java
+        line_start: 126
+        line_end: 139
+        excerpt: |
+          private boolean checkInventory(LineItemLocal item)  {
+            try {
+              InventoryLocal inv = invHome.findByPrimaryKey(item.getItemId());
+              if(inv.getQuantity() < item.getQuantity())
+                return(false);
+              inv.reduceQuantity(item.getQuantity());
+            } catch (FinderException fe) {
+              // swallow the finder exception because this means
+              // supplier has not been populated; So we cant fulfill
+              // this part of the order now
+              return(false);
+            }
+            return(true);
+          }
+    stack_metadata:
+      ejb.bean: OrderFulfillmentFacadeEJB
+      ejb.transaction: Required
+
+  - record_key: ORD-REQU-0003
+    kind: requirement
+    capability_key: order-fulfillment
+    requirement: >
+      WHEN an inventory check succeeds for a line item, the system SHALL
+      reduce the inventory quantity by the ordered amount.
+    confidence: high
+    confidence_basis: >
+      Inventory reduction is explicitly coded in checkInventory at line 131
+      calling inv.reduceQuantity(), and confirmed in InventoryEJB implementation
+      which subtracts the amount from current quantity.
+    risk_class: operational
+    basis: >
+      checkInventory() calls inv.reduceQuantity(item.getQuantity()) immediately
+      after verifying sufficient quantity. InventoryEJB.reduceQuantity() at line 82-85
+      implements "setQuantity(q-quantity)" to perform the reduction.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/supplier/src/com/sun/j2ee/blueprints/supplier/orderfulfillment/ejb/OrderFulfillmentFacadeEJB.java
+        line_start: 126
+        line_end: 139
+        excerpt: |
+          inv.reduceQuantity(item.getQuantity());
+      - path: legacy-source/petstore1.3.2/src/apps/supplier/src/com/sun/j2ee/blueprints/supplier/inventory/ejb/InventoryEJB.java
+        line_start: 82
+        line_end: 85
+        excerpt: |
+          public void reduceQuantity(int quantity) {
+            int q = this.getQuantity();
+            setQuantity(q-quantity);
+          }
+    stack_metadata:
+      ejb.bean: InventoryEJB
+
+  - record_key: ORD-REQU-0004
+    kind: requirement
+    capability_key: order-fulfillment
+    requirement: >
+      WHEN inventory is not found for a line item, the system SHALL NOT fulfill
+      that line item and SHALL continue processing other line items.
+    confidence: high
+    confidence_basis: >
+      FinderException is caught and swallowed in checkInventory, returning false.
+      processAnOrder loop continues after checkInventory failure.
+    risk_class: operational
+    basis: >
+      checkInventory() catches FinderException and returns false without raising
+      an error, allowing the caller processAnOrder to continue the loop iteration
+      to the next item.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/supplier/src/com/sun/j2ee/blueprints/supplier/orderfulfillment/ejb/OrderFulfillmentFacadeEJB.java
+        line_start: 132
+        line_end: 137
+        excerpt: |
+          } catch (FinderException fe) {
+            // swallow the finder exception because this means
+            // supplier has not been populated; So we cant fulfill
+            // this part of the order now
+            return(false);
+          }
+    stack_metadata:
+      ejb.bean: OrderFulfillmentFacadeEJB
+
+  - record_key: ORD-REQU-0005
+    kind: requirement
+    capability_key: order-fulfillment
+    requirement: >
+      WHEN all line items in an order can be fulfilled from inventory, the system
+      SHALL set the order status to COMPLETED.
+    confidence: high
+    confidence_basis: >
+      processAnOrder explicitly sets po.setPoStatus(OrderStatusNames.COMPLETED)
+      at line 198 when allItemsAvailable flag remains true after processing all items.
+    risk_class: operational
+    basis: >
+      processAnOrder at line 197-198 checks "if(allItemsAvailable)" and calls
+      "po.setPoStatus(OrderStatusNames.COMPLETED)". The allItemsAvailable flag starts
+      true and is only set false when checkInventory returns false.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/supplier/src/com/sun/j2ee/blueprints/supplier/orderfulfillment/ejb/OrderFulfillmentFacadeEJB.java
+        line_start: 176
+        line_end: 210
+        excerpt: |
+          private String processAnOrder(SupplierOrderLocal po)
+            throws XMLDocumentException  {
+              boolean allItemsAvailable = true;
+              boolean invoiceReqd = false;
+              String invoiceXml = null;
+
+              HashMap items = new HashMap();
+              Collection liColl = po.getLineItems();
+              Iterator liIt = liColl.iterator();
+              while((liIt != null) && (liIt.hasNext())) {
+                LineItemLocal li = (LineItemLocal) liIt.next();
+                if(li.getQuantity() == li.getQuantityShipped())
+                  continue;
+                if(!checkInventory(li)) {
+                  allItemsAvailable = false;
+                  continue;
+                }
+                li.setQuantityShipped(li.getQuantity());
+                items.put(li.getItemId(), OrderStatusNames.COMPLETED);
+                invoiceReqd = true;
+              }
+              if(allItemsAvailable)
+                po.setPoStatus(OrderStatusNames.COMPLETED);
+    stack_metadata:
+      ejb.bean: OrderFulfillmentFacadeEJB
+      ejb.transaction: Required
+
+  - record_key: ORD-REQU-0006
+    kind: requirement
+    capability_key: order-fulfillment
+    requirement: >
+      WHEN a line item has already been partially or fully shipped (quantityShipped > 0),
+      the system SHALL skip processing that line item.
+    confidence: high
+    confidence_basis: >
+      Explicit continue statement in processAnOrder at line 187-188 checks
+      "if(li.getQuantity() == li.getQuantityShipped()) continue".
+    risk_class: operational
+    basis: >
+      processAnOrder loop checks if already shipped at line 187-188 and continues
+      to next item if true.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/supplier/src/com/sun/j2ee/blueprints/supplier/orderfulfillment/ejb/OrderFulfillmentFacadeEJB.java
+        line_start: 185
+        line_end: 196
+        excerpt: |
+          while((liIt != null) && (liIt.hasNext())) {
+            LineItemLocal li = (LineItemLocal) liIt.next();
+            if(li.getQuantity() == li.getQuantityShipped())
+              continue;
+            if(!checkInventory(li)) {
+              allItemsAvailable = false;
+              continue;
+            }
+            li.setQuantityShipped(li.getQuantity());
+    stack_metadata:
+      ejb.bean: OrderFulfillmentFacadeEJB
+
+  - record_key: ORD-REQU-0007
+    kind: requirement
+    capability_key: order-fulfillment
+    requirement: >
+      WHEN a line item is successfully fulfilled, the system SHALL generate an
+      invoice entry containing the item's category, product, item ID, line number,
+      quantity, and unit price.
+    confidence: high
+    confidence_basis: >
+      createInvoice method at lines 159-164 explicitly adds each line item
+      using invoiceXDE.addLineItem with all six parameters.
+    risk_class: operational
+    basis: >
+      createInvoice iterates items and calls invoiceXDE.addLineItem(anItem.getCategoryId(),
+      anItem.getProductId(), anItem.getItemId(), anItem.getLineNumber(),
+      anItem.getQuantity(), anItem.getUnitPrice()).
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/supplier/src/com/sun/j2ee/blueprints/supplier/orderfulfillment/ejb/OrderFulfillmentFacadeEJB.java
+        line_start: 145
+        line_end: 171
+        excerpt: |
+          private String createInvoice(SupplierOrderLocal po, HashMap newLis)
+            throws XMLDocumentException {
+              invoiceXDE.newDocument();
+              invoiceXDE.setOrderId(po.getPoId());
+              invoiceXDE.setUserId("Dear PetStore Customer");
+              Date poDate = new Date(po.getPoDate());
+              invoiceXDE.setOrderDate(poDate);
+              Date curDate = new Date();
+              invoiceXDE.setShippingDate(curDate);
+              Collection items = po.getLineItems();
+              Iterator it = items.iterator();
+              while((it != null) && (it.hasNext())) {
+                LineItemLocal anItem = (LineItemLocal)it.next();
+                if(newLis.containsKey(anItem.getItemId())) {
+                  invoiceXDE.addLineItem(anItem.getCategoryId(),
+                                         anItem.getProductId(),
+                                         anItem.getItemId(),
+                                         anItem.getLineNumber(),
+                                         anItem.getQuantity(),
+                                         anItem.getUnitPrice());
+                }
+              }
+    stack_metadata:
+      ejb.bean: OrderFulfillmentFacadeEJB
+
+  - record_key: ORD-REQU-0008
+    kind: requirement
+    capability_key: order-fulfillment
+    requirement: >
+      WHEN an order is fulfilled and an invoice is generated, the system SHALL
+      return the invoice as a serialized XML document.
+    confidence: high
+    confidence_basis: >
+      processPO method signature returns String, and createInvoice returns
+      invoiceXDE.getDocumentAsString() at line 169.
+    risk_class: operational
+    basis: >
+      createInvoice calls invoiceXDE.getDocumentAsString() and returns the result
+      as a String. processPO then returns this invoiceXml to the caller.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/supplier/src/com/sun/j2ee/blueprints/supplier/orderfulfillment/ejb/OrderFulfillmentFacadeEJB.java
+        line_start: 167
+        line_end: 171
+        excerpt: |
+          String invDoc = null;
+          invDoc = invoiceXDE.getDocumentAsString();
+          return(invDoc);
+    stack_metadata:
+      ejb.bean: OrderFulfillmentFacadeEJB
+
+  - record_key: ORD-REQU-0009
+    kind: requirement
+    capability_key: order-fulfillment
+    requirement: >
+      WHEN no line items are fulfilled (all inventory checks fail or no items
+      need fulfillment), the system SHALL NOT generate an invoice and SHALL
+      return null.
+    confidence: high
+    confidence_basis: >
+      processAnOrder only sets invoiceReqd=true when checkInventory succeeds.
+      If invoiceReqd remains false, createInvoice is not called and null is returned.
+    risk_class: operational
+    basis: >
+      processAnOrder at line 199-207 only calls createInvoice if invoiceReqd is true.
+      invoiceReqd is only set true at line 195 after successful inventory check.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/supplier/src/com/sun/j2ee/blueprints/supplier/orderfulfillment/ejb/OrderFulfillmentFacadeEJB.java
+        line_start: 197
+        line_end: 210
+        excerpt: |
+          if(allItemsAvailable)
+            po.setPoStatus(OrderStatusNames.COMPLETED);
+          if(invoiceReqd) {
+            try {
+              invoiceXml = (createInvoice(po, items));
+            } catch (XMLDocumentException xe) {
+              System.out.println("OrderFulfillmentFacade**" + xe);
+              return null;
+            }
+          }
+          return invoiceXml;
+    stack_metadata:
+      ejb.bean: OrderFulfillmentFacadeEJB
+
+  - record_key: ORD-REQU-0010
+    kind: requirement
+    capability_key: order-fulfillment
+    requirement: >
+      The system SHALL provide a processPendingPO operation that finds all orders
+      with PENDING status and attempts to fulfill them using current inventory.
+    confidence: high
+    confidence_basis: >
+      processPendingPO method explicitly calls supplierOrderLocalHome.findOrdersByStatus(OrderStatusNames.PENDING)
+      and iterates through results calling processAnOrder.
+    risk_class: operational
+    basis: >
+      processPendingPO at lines 247-269 queries for PENDING orders and processes each one.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/supplier/src/com/sun/j2ee/blueprints/supplier/orderfulfillment/ejb/OrderFulfillmentFacadeEJB.java
+        line_start: 247
+        line_end: 269
+        excerpt: |
+          public Collection processPendingPO() throws FinderException {
+            ArrayList invoices = new ArrayList();
+
+            Collection coll =
+              supplierOrderLocalHome.findOrdersByStatus(OrderStatusNames.PENDING);
+            if(coll != null) {
+              Iterator it = coll.iterator();
+              while((it!=null) && (it.hasNext())) {
+                SupplierOrderLocal order = (SupplierOrderLocal) it.next();
+                String newInvoice = null;
+                try {
+                  newInvoice = processAnOrder(order);
+                } catch (XMLDocumentException xe) {
+                  // ignore since means we cant fulfill this order now
+                  System.out.println("OrderFulfillmentFacade:" + xe);
+                }
+                if(newInvoice != null) {
+                  invoices.add(newInvoice);
+                }
+              }
+            }
+            return invoices;
+          }
+    stack_metadata:
+      ejb.bean: OrderFulfillmentFacadeEJB
+      ejb.transaction: Required
+
+  - record_key: ORD-REQU-0011
+    kind: requirement
+    capability_key: order-fulfillment
+    requirement: >
+      The system SHALL receive purchase orders via asynchronous JMS messages
+      and process them without blocking the message producer.
+    confidence: high
+    confidence_basis: >
+      SupplierOrderMDB implements MessageListener and processes messages in onMessage().
+      Message-driven bean pattern is declared in ejb-jar.xml at line 85-129.
+    risk_class: operational
+    basis: >
+      SupplierOrderMDB.onMessage() receives TextMessage from JMS queue, extracts
+      the XML text, and calls processPO asynchronously.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/supplier/src/ejb-jar.xml
+        line_start: 85
+        line_end: 129
+        excerpt: |
+          <message-driven>
+            <description>opc node to process PurchaseOrders from the Java Pet Store</description>
+            <display-name>SupplierOrderMDB</display-name>
+            <ejb-name>SupplierOrderMDB</ejb-name>
+            <ejb-class>com.sun.j2ee.blueprints.supplier.processpo.ejb.SupplierOrderMDB</ejb-class>
+            <transaction-type>Container</transaction-type>
+            <message-driven-destination>
+              <destination-type>javax.jms.Queue</destination-type>
+            </message-driven-destination>
+      - path: legacy-source/petstore1.3.2/src/apps/supplier/src/com/sun/j2ee/blueprints/supplier/processpo/ejb/SupplierOrderMDB.java
+        line_start: 101
+        line_end: 123
+        excerpt: |
+          public void onMessage(Message recvMsg) {
+            try {
+              String messageID = recvMsg.getJMSMessageID();
+              TextMessage recdTM = (TextMessage)recvMsg;
+              String recdText = recdTM.getText();
+
+              // Do processing work on received message
+              String invoice = doWork(recdText);
+
+              // If orders were shipped, do the transition
+              if(invoice!=null) {
+                doTransition(invoice);
+              }
+    stack_metadata:
+      ejb.bean: SupplierOrderMDB
+      jms.queue: OPC Queue
+      ejb.transaction: Required
+
+  - record_key: ORD-REQU-0012
+    kind: requirement
+    capability_key: order-fulfillment
+    requirement: >
+      WHEN an order is fulfilled and an invoice is generated, the system SHALL
+      send the invoice via asynchronous message transition.
+    confidence: high
+    confidence_basis: >
+      SupplierOrderMDB.onMessage() calls doTransition() when invoice != null,
+      which uses TransitionDelegate to send the invoice.
+    risk_class: operational
+    basis: >
+      SupplierOrderMDB at lines 111-113 calls doTransition(invoice) when invoice
+      is not null.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/supplier/src/com/sun/j2ee/blueprints/supplier/processpo/ejb/SupplierOrderMDB.java
+        line_start: 101
+        line_end: 123
+        excerpt: |
+          // If orders were shipped, do the transition
+          if(invoice!=null) {
+            doTransition(invoice);
+          }
+    stack_metadata:
+      ejb.bean: SupplierOrderMDB
+      jms.topic: InvoiceTopic
+
+  - record_key: SUP-AUTH-0001
+    kind: requirement
+    capability_key: supplier-portal
+    requirement: >
+      The system SHALL require authentication before allowing access to supplier
+      inventory management operations, using form-based login with username and password.
+    confidence: high
+    confidence_basis: >
+      web.xml declares <login-config> with auth-method FORM at lines 106-113,
+      and form-login-page pointing to login.jsp.
+    risk_class: operational
+    basis: >
+      web.xml authentication configuration requires FORM-based login with login.jsp
+      and error.jsp for failed authentication.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/supplier/src/docroot/WEB-INF/web.xml
+        line_start: 106
+        line_end: 113
+        excerpt: |
+          <login-config>
+            <auth-method>FORM</auth-method>
+            <realm-name>default</realm-name>
+            <form-login-config>
+              <form-login-page>/login.jsp</form-login-page>
+              <form-error-page>/error.jsp</form-error-page>
+            </form-login-config>
+          </login-config>
+    stack_metadata:
+      framework: J2EE Servlet
+      declarative_validator: web.xml
+
+  - record_key: SUP-AUTH-0002
+    kind: requirement
+    capability_key: supplier-portal
+    requirement: >
+      The system SHALL restrict the inventory update operation to users with
+      the "administrator" role.
+    confidence: high
+    confidence_basis: >
+      web.xml security-constraint at lines 91-104 restricts /RcvrRequestProcessor
+      to administrator role. displayinventory.jsp explicitly checks
+      request.isUserInRole("administrator").
+    risk_class: operational
+    basis: >
+      web.xml declares security-constraint for /RcvrRequestProcessor with
+      auth-constraint role-name "administrator". JSP also validates role.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/supplier/src/docroot/WEB-INF/web.xml
+        line_start: 91
+        line_end: 104
+        excerpt: |
+          <security-constraint>
+            <web-resource-collection>
+              <web-resource-name>MySecureBit0</web-resource-name>
+              <url-pattern>/RcvrRequestProcessor</url-pattern>
+              <http-method>GET</http-method>
+              <http-method>POST</http-method>
+            </web-resource-collection>
+            <auth-constraint>
+              <role-name>administrator</role-name>
+            </auth-constraint>
+      - path: legacy-source/petstore1.3.2/src/apps/supplier/src/docroot/displayinventory.jsp
+        line_start: 66
+        line_end: 68
+        excerpt: |
+          <%
+          if(request.isUserInRole("administrator")) {
+          %>
+    stack_metadata:
+      framework: J2EE Servlet
+      declarative_validator: web.xml
+
+  - record_key: SUP-OPER-0001
+    kind: requirement
+    capability_key: supplier-portal
+    requirement: >
+      The system SHALL maintain user sessions with a timeout of 54 minutes of
+      inactivity.
+    confidence: high
+    confidence_basis: >
+      web.xml session-config at line 73 explicitly sets session-timeout to 54 minutes.
+    risk_class: operational
+    basis: >
+      web.xml declares <session-timeout>54</session-timeout>.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/supplier/src/docroot/WEB-INF/web.xml
+        line_start: 72
+        line_end: 74
+        excerpt: |
+          <session-config>
+            <session-timeout>54</session-timeout>
+          </session-config>
+    stack_metadata:
+      framework: J2EE Servlet
+
+  - record_key: SUP-OPER-0002
+    kind: requirement
+    capability_key: supplier-portal
+    requirement: >
+      The system SHALL provide an inventory display page that shows all inventory
+      items with their current quantities.
+    confidence: high
+    confidence_basis: >
+      DisplayInventoryBean.getInventory() calls findAllInventoryItems query and
+      displayinventory.jsp renders the results in a table.
+    risk_class: presentational
+    basis: >
+      displayinventory.jsp uses DisplayInventoryBean to fetch all inventory items
+      and displays them in a table with current quantities.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/supplier/src/docroot/displayinventory.jsp
+        line_start: 59
+        line_end: 108
+        excerpt: |
+          <jsp:useBean
+              id="displayInventory"
+              class="com.sun.j2ee.blueprints.supplier.inventory.web.DisplayInventoryBean"
+              scope="session"
+          />
+          <%
+          Collection inventoryItems = displayInventory.getInventory();
+          if (inventoryItems != null) {
+          %>
+              <table border="0" bgcolor="#336666">
+              <tr>
+                <td>Item Id</td>
+                <td>Existing Quantity</td>
+                <td>New Quantity</td>
+              </tr>
+              <%
+              Iterator it = inventoryItems.iterator();
+              while ((it != null) && it.hasNext()) {
+                InventoryLocal anItem = (InventoryLocal)it.next();
+              %>
+                <tr>
+                <td><%= anItem.getItemId() %></td>
+                <td><%= anItem.getQuantity() %></td>
+    stack_metadata:
+      jsp.page: displayinventory.jsp
+      framework: J2EE JSP
+
+  - record_key: SUP-OPER-0003
+    kind: requirement
+    capability_key: supplier-portal
+    requirement: >
+      The system SHALL allow authorized users to update inventory quantities
+      for items and submit updates via form.
+    confidence: high
+    confidence_basis: >
+      displayinventory.jsp renders form fields named "qty_<itemId>" for quantity
+      input. RcvrRequestProcessor.updateInventory() parses these and updates.
+    risk_class: operational
+    basis: >
+      displayinventory.jsp creates input fields for each item, RcvrRequestProcessor
+      parses them and calls inventory.setQuantity().
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/supplier/src/docroot/displayinventory.jsp
+        line_start: 97
+        line_end: 104
+        excerpt: |
+          <td><input type="text"
+             name="<%= "qty_"+ anItem.getItemId() %>"
+             size="6"></td>
+          <td align="center">
+              <input type=checkbox
+             name="<%= "item_"+ anItem.getItemId() %>"
+             value="false"></td>
+      - path: legacy-source/petstore1.3.2/src/apps/supplier/src/com/sun/j2ee/blueprints/supplier/inventory/web/RcvrRequestProcessor.java
+        line_start: 110
+        line_end: 137
+        excerpt: |
+          private void updateInventory(HttpServletRequest req) {
+            String itemId;
+            InventoryLocal inventory;
+            try {
+              Enumeration e = req.getParameterNames();
+              while ((e != null) && e.hasMoreElements()) {
+                String param = ((String)e.nextElement()).trim();
+                if ((param != null) && param.startsWith("item_")) {
+                  itemId = param.substring("item_".length(),param.length());
+                  if(itemId != null) {
+                    String newQty = req.getParameter("qty_" + itemId);
+                    if((newQty == null) || (newQty.length() <= 0))
+                      continue;
+                    Integer qty = new Integer(newQty);
+                    if(qty.intValue() >= 0 ) {
+                      inventory = inventoryHomeRef.findByPrimaryKey(itemId);
+                      inventory.setQuantity(qty.intValue());
+                    }
+                  }
+                }
+              }
+    stack_metadata:
+      jsp.page: displayinventory.jsp
+      framework: J2EE JSP
+
+  - record_key: SUP-OPER-0004
+    kind: requirement
+    capability_key: supplier-portal
+    requirement: >
+      WHEN inventory is updated, the system SHALL verify that the new quantity
+      is non-negative (>= 0) before accepting the update.
+    confidence: high
+    confidence_basis: >
+      RcvrRequestProcessor.updateInventory() at line 127 explicitly checks
+      "if(qty.intValue() >= 0)" before calling setQuantity().
+    risk_class: operational
+    basis: >
+      updateInventory method parses quantity and checks if >= 0 before updating.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/supplier/src/com/sun/j2ee/blueprints/supplier/inventory/web/RcvrRequestProcessor.java
+        line_start: 110
+        line_end: 137
+        excerpt: |
+          Integer qty = new Integer(newQty);
+          if(qty.intValue() >= 0 ) {
+            inventory = inventoryHomeRef.findByPrimaryKey(itemId);
+            inventory.setQuantity(qty.intValue());
+          }
+    stack_metadata:
+      framework: J2EE Servlet
+
+  - record_key: SUP-OPER-0005
+    kind: requirement
+    capability_key: supplier-portal
+    requirement: >
+      WHEN the user submits inventory updates, the system SHALL automatically
+      attempt to fulfill all pending purchase orders using the updated inventory.
+    confidence: high
+    confidence_basis: >
+      RcvrRequestProcessor.doPost() handles "updateinventory" screen action at
+      line 179-207, calling processPendingPO() after updating inventory.
+    risk_class: operational
+    basis: >
+      updateinventory screen action updates inventory then calls procPO.processPendingPO()
+      to find and fulfill pending orders.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/supplier/src/com/sun/j2ee/blueprints/supplier/inventory/web/RcvrRequestProcessor.java
+        line_start: 179
+        line_end: 207
+        excerpt: |
+          if(curScreen.equals("updateinventory")) {
+            UserTransaction ut = null;
+            try {
+              InitialContext ic = new InitialContext();
+              ut = (UserTransaction) ic.lookup(JNDINames.USER_TRANSACTION);
+              ut.begin();        // start the xaction.
+              updateInventory(req);
+              Collection invoices = procPO.processPendingPO();
+              sendInvoices(invoices);
+              ut.commit();        // end xaction
+    stack_metadata:
+      framework: J2EE Servlet
+      ejb.transaction: Required
+
+  - record_key: SUP-OPER-0006
+    kind: requirement
+    capability_key: supplier-portal
+    requirement: >
+      WHEN invoices are generated during the update inventory operation, the
+      system SHALL send all generated invoices via message transition.
+    confidence: high
+    confidence_basis: >
+      RcvrRequestProcessor.doPost() calls sendInvoices() with the collection
+      returned from processPendingPO().
+    risk_class: operational
+    basis: >
+      updateinventory action calls processPendingPO() then passes all invoices
+      to sendInvoices() which iterates and sends each via transition.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/supplier/src/com/sun/j2ee/blueprints/supplier/inventory/web/RcvrRequestProcessor.java
+        line_start: 179
+        line_end: 207
+        excerpt: |
+          updateInventory(req);
+          Collection invoices = procPO.processPendingPO();
+          sendInvoices(invoices);
+          ut.commit();
+      - path: legacy-source/petstore1.3.2/src/apps/supplier/src/com/sun/j2ee/blueprints/supplier/inventory/web/RcvrRequestProcessor.java
+        line_start: 139
+        line_end: 157
+        excerpt: |
+          private void sendInvoices(Collection invoices) {
+            try {
+              ServiceLocator serviceLocator = ServiceLocator.getInstance();
+              String tdClassName = serviceLocator.getString(JNDINames.TRANSITION_DELEGATE__SUPPLIER_ORDER);
+              TransitionDelegateFactory tdf = new TransitionDelegateFactory();
+              transitionDelegate = tdf.getTransitionDelegate(tdClassName);
+              transitionDelegate.setup();
+              Iterator it = invoices.iterator();
+              while((it!=null) && (it.hasNext())) {
+                String anInvoice = (String) it.next();
+                TransitionInfo info = new TransitionInfo(anInvoice);
+                transitionDelegate.doTransition(info);
+              }
+    stack_metadata:
+      framework: J2EE Servlet
+
+  - record_key: SUP-OPER-0007
+    kind: requirement
+    capability_key: supplier-portal
+    requirement: >
+      The system SHALL wrap the inventory update and order fulfillment operations
+      in a database transaction to ensure atomicity.
+    confidence: high
+    confidence_basis: >
+      RcvrRequestProcessor.doPost() explicitly looks up UserTransaction, calls
+      ut.begin() before operations, and ut.commit() after success.
+    risk_class: operational
+    basis: >
+      updateinventory action uses explicit UserTransaction management with
+      begin() and commit() calls wrapping all operations.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/supplier/src/com/sun/j2ee/blueprints/supplier/inventory/web/RcvrRequestProcessor.java
+        line_start: 179
+        line_end: 207
+        excerpt: |
+          UserTransaction ut = null;
+          try {
+            InitialContext ic = new InitialContext();
+            ut = (UserTransaction) ic.lookup(JNDINames.USER_TRANSACTION);
+            ut.begin();        // start the xaction.
+            updateInventory(req);
+            Collection invoices = procPO.processPendingPO();
+            sendInvoices(invoices);
+            ut.commit();        // end xaction
+    stack_metadata:
+      framework: J2EE Servlet
+
+  - record_key: INV-ENTI-0001
+    kind: entity
+    capability_key: order-fulfillment
+    requirement: >
+      The system SHALL maintain an Inventory entity with itemId (unique identifier)
+      and quantity (available count) attributes.
+    confidence: high
+    confidence_basis: >
+      InventoryEJB is declared as Entity CMP at ejb-jar.xml line 49-81 with
+      two cmp-fields: itemId and quantity. Primary key is itemId.
+    risk_class: operational
+    basis: >
+      ejb-jar.xml declares Entity bean InventoryEJB with cmp-fields itemId
+      and quantity, with itemId as primkey-field.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/supplier/src/ejb-jar.xml
+        line_start: 49
+        line_end: 81
+        excerpt: |
+          <entity>
+            <description>Inventory CMP EJB</description>
+            <display-name>InventoryEB</display-name>
+            <ejb-name>InventoryEJB</ejb-name>
+            <local-home>com.sun.j2ee.blueprints.supplier.inventory.ejb.InventoryLocalHome</local-home>
+            <local>com.sun.j2ee.blueprints.supplier.inventory.ejb.InventoryLocal</local>
+            <ejb-class>com.sun.j2ee.blueprints.supplier.inventory.ejb.InventoryEJB</ejb-class>
+            <persistence-type>Container</persistence-type>
+            <prim-key-class>java.lang.String</prim-key-class>
+            <reentrant>False</reentrant>
+            <cmp-version>2.x</cmp-version>
+            <abstract-schema-name>Inventory</abstract-schema-name>
+            <cmp-field>
+              <field-name>itemId</field-name>
+            </cmp-field>
+            <cmp-field>
+              <field-name>quantity</field-name>
+            </cmp-field>
+            <primkey-field>itemId</primkey-field>
+    stack_metadata:
+      ejb.bean: InventoryEJB
+      db.object: Inventory entity CMP
+
+  - record_key: INV-QUER-0001
+    kind: requirement
+    capability_key: order-fulfillment
+    requirement: >
+      The system SHALL provide a query to retrieve all inventory items.
+    confidence: high
+    confidence_basis: >
+      ejb-jar.xml declares EJBQL query findAllInventoryItems at line 72-80
+      that selects all Inventory objects.
+    risk_class: operational
+    basis: >
+      ejb-jar.xml defines query "Select OBJECT(a) From Inventory a" for
+      findAllInventoryItems method.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/supplier/src/ejb-jar.xml
+        line_start: 72
+        line_end: 80
+        excerpt: |
+          <query>
+            <description>EJBQL to find all Inventory Items</description>
+            <query-method>
+              <method-name>findAllInventoryItems</method-name>
+              <method-params />
+            </query-method>
+            <ejb-ql>Select OBJECT(a) From Inventory a</ejb-ql>
+          </query>
+    stack_metadata:
+      ejb.bean: InventoryEJB
+
+  - record_key: XML-PROC-0001
+    kind: requirement
+    capability_key: order-fulfillment
+    requirement: >
+      The system SHALL validate incoming purchase order XML documents against
+      a schema if validation is enabled via configuration.
+    confidence: medium
+    confidence_basis: >
+      ejb-jar.xml declares XML validation configuration at line 146-154 with
+      param/xml/validation/SupplierOrder and param/xml/xsdvalidation/SupplierOrder
+      boolean flags. However, the actual validation code and flag values are
+      redacted.
+    risk_class: operational
+    basis: >
+      ejb-jar.xml environment entries for XML validation are configured in
+      OrderFulfillmentFacadeEJB, passed to TPASupplierOrderXDE constructor.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/supplier/src/ejb-jar.xml
+        line_start: 145
+        line_end: 164
+        excerpt: |
+          <env-entry>
+           <env-entry-name>param/xml/validation/SupplierOrder</env-entry-name>
+           <env-entry-type>java.lang.Boolean</env-entry-type>
+           <env-entry-value>«REDACTED:secret-finding-55»</env-entry-value>
+          </env-entry>
+          <env-entry>
+           <env-entry-name>param/xml/xsdvalidation/SupplierOrder</env-entry-name>
+           <env-entry-type>java.lang.Boolean</env-entry-type>
+           <env-entry-value>«REDACTED:secret-finding-56»</env-entry-value>
+          </env-entry>
+    stack_metadata:
+      ejb.bean: OrderFulfillmentFacadeEJB
+      declarative_validator: ejb-jar.xml
+
+findings:
+  - kind: unparseable
+    path: legacy-source/petstore1.3.2/src/apps/supplier/src/ejb-jar.xml
+    description: >
+      XML validation configuration values are redacted (secret-finding-55, 56, 57, 58)
+      making it impossible to determine whether XML validation and XSD validation
+      are actually enabled or disabled. A human must verify the actual configuration
+      values to determine validation behavior.
+
+  - kind: ambiguity
+    path: legacy-source/petstore1.3.2/src/apps/supplier/src/com/sun/j2ee/blueprints/supplier/orderfulfillment/ejb/OrderFulfillmentFacadeEJB.java
+    description: >
+      The XML transformation between TPASupplierOrder XML format and SupplierOrder
+      entity format is handled by TPASupplierOrderXDE class which is not present
+      in the supplied source. The exact data mapping and transformation rules cannot
+      be verified from the available code alone. The XSL stylesheet shows some field
+      reordering (FirstName->FamilyName, LastName->GivenName) which may or may not
+      be intentional.
+
+  - kind: conflict
+    path: legacy-source/petstore1.3.2/src/apps/supplier/src/docroot/displayinventory.jsp
+    description: >
+      The JSP form includes checkboxes with name "item_<itemId>" but the form
+      processing in RcvrRequestProcessor.updateInventory() only processes items
+      where a parameter starting with "item_" exists. However, the logic does not
+      validate that the checkbox was actually checked - it only verifies the parameter
+      exists. This means even unchecked checkboxes might be processed depending on
+      browser form submission behavior. The intended behavior (only update checked
+      items) is ambiguous.
+
+  - kind: unparseable
+    path: legacy-source/petstore1.3.2/src/apps/supplier/src/com/sun/j2ee/blueprints/supplier/rsrc/xsl/TPASupplierOrder.xsl
+    description: >
+      The XSL template at lines 26-27 maps tpaso:FirstName to FamilyName and
+      tpaso:LastName to GivenName, which appears to be a field reversal. This may be
+      intentional data transformation or a bug. The context does not clarify whether
+      this is the correct mapping.
+
+  - kind: ambiguity
+    path: legacy-source/petstore1.3.2/src/apps/supplier/src/com/sun/j2ee/blueprints/supplier/inventory/web/RcvrRequestProcessor.java
+    description: >
+      The updateInventory method silently ignores empty quantity values (line 124-125)
+      with "continue" but does not provide user feedback. The user will not know which
+      items were skipped due to empty input. Error handling and user feedback behavior
+      is undefined.
+
+  - kind: unparseable
+    path: legacy-source/petstore1.3.2/src/apps/supplier/src/com/sun/j2ee/blueprints/supplier/orderfulfillment/ejb/OrderFulfillmentFacadeEJB.java
+    description: >
+      OrderStatusNames.COMPLETED and OrderStatusNames.PENDING are external constants
+      from a component not included in the source. The actual string values these
+      resolve to cannot be determined, making it impossible to verify order status
+      values against documentation or other systems.
+
+  - kind: ambiguity
+    path: legacy-source/petstore1.3.2/src/apps/supplier/src/docroot/displayinventory.jsp
+    description: >
+      The displayinventory.jsp creates a session-scoped bean (DisplayInventoryBean)
+      with scope="session", but inventory can be updated by multiple suppliers or in
+      parallel. Session scope means each user gets their own inventory view which may
+      not reflect concurrent updates from other users. Session caching behavior and
+      invalidation strategy is not defined.
