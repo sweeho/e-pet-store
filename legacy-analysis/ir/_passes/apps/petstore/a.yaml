@@ -1,0 +1,759 @@
+records:
+  - record_key: SHOP-ENTITY-0001
+    kind: entity
+    capability_key: shopping-cart
+    requirement: >
+      The system SHALL maintain a ShoppingCart entity that stores items selected by
+      a user during a shopping session, with each item containing product information,
+      unit cost, and quantity.
+    confidence: high
+    confidence_basis: >
+      Both passes can verify this from the ShoppingCart EJB interface and CartEvent
+      handler. The ShoppingCartLocal interface defines methods for addItem, deleteItem,
+      updateItemQuantity, getItems, and empty operations. Multiple sources (EJB definition,
+      action handlers, JSP references) confirm this structure.
+    risk_class: operational
+    basis: >
+      ShoppingCart EJB is defined with JNDI ref ejb/ShoppingCart in web.xml and handles
+      cart operations through CartEJBAction. CartItem model contains category, productId,
+      itemId, quantity, and unitCost.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/petstore/src/docroot/WEB-INF/web.xml
+        line_start: 233
+        line_end: 239
+        excerpt: |
+          <ejb-local-ref>
+            <ejb-ref-name>ejb/ShoppingCart</ejb-ref-name>
+            <ejb-ref-type>Session</ejb-ref-type>
+            <local-home>com.sun.j2ee.blueprints.cart.ejb.ShoppingCartLocalHome</local-home>
+            <local>com.sun.j2ee.blueprints.cart.ejb.ShoppingCartLocal</local>
+            <ejb-link>ShoppingCartEJB</ejb-link>
+          </ejb-local-ref>
+      - path: legacy-source/petstore1.3.2/src/apps/petstore/src/com/sun/j2ee/blueprints/petstore/controller/ejb/actions/CartEJBAction.java
+        line_start: 59
+        line_end: 91
+        excerpt: |
+          public EventResponse perform(Event e) throws EventException {
+              CartEvent ce = (CartEvent)e;
+              ShoppingClientFacadeLocal scf = null;
+              scf = (ShoppingClientFacadeLocal)machine.getAttribute(PetstoreKeys.SHOPPING_CLIENT_FACADE);
+              ShoppingCartLocal cart = scf.getShoppingCart();
+              switch (ce.getActionType()) {
+                  case  CartEvent.ADD_ITEM  : {
+                      cart.addItem(ce.getItemId());
+                  }
+                  case  CartEvent.DELETE_ITEM : {
+                      cart.deleteItem(ce.getItemId());
+                  }
+                  case  CartEvent.UPDATE_ITEMS : {
+                      // ... updateItemQuantity calls
+                  }
+
+  - record_key: CART-WORKFLOW-0001
+    kind: workflow
+    capability_key: shopping-cart
+    requirement: >
+      The system SHALL support the following cart operations in sequence:
+      GIVEN a user is shopping,
+      WHEN the user selects an item,
+      THEN the system SHALL add the item to the shopping cart with default quantity of 1;
+      WHEN the user modifies cart quantities,
+      THEN the system SHALL update the quantity for each item;
+      WHEN the user removes an item,
+      THEN the system SHALL delete the item from the cart;
+      WHEN the user views the cart,
+      THEN the system SHALL display all items with product details, unit cost, quantity,
+      and calculated line total (unitCost * quantity).
+    confidence: high
+    confidence_basis: >
+      The CartEJBAction code explicitly implements ADD_ITEM, DELETE_ITEM, and UPDATE_ITEMS
+      cases. Cart retrieval and display are referenced across multiple JSP files.
+    risk_class: operational
+    basis: >
+      CartEJBAction.perform() method dispatches on CartEvent.getActionType() with explicit
+      handling for ADD_ITEM (adds item), DELETE_ITEM (deletes item), and UPDATE_ITEMS
+      (updates quantities via updateItemQuantity calls). OrderEJBAction.perform() calls
+      cart.getItems() and iterates CartItem objects containing unitCost and quantity.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/petstore/src/com/sun/j2ee/blueprints/petstore/controller/ejb/actions/CartEJBAction.java
+        line_start: 66
+        line_end: 89
+        excerpt: |
+          switch (ce.getActionType()) {
+              case  CartEvent.ADD_ITEM  : {
+                  cart.addItem(ce.getItemId());
+              }
+              break;
+              case  CartEvent.DELETE_ITEM : {
+                  cart.deleteItem(ce.getItemId());
+              }
+              break;
+              case  CartEvent.UPDATE_ITEMS : {
+                  Map items = ce.getItems();
+                  Iterator it = null;
+                  if (items != null) it = items.keySet().iterator();
+                  while ((it != null) && it.hasNext()) {
+                      String itemId = (String)it.next();
+                      int quantity = ((Integer)items.get(itemId)).intValue();
+                      cart.updateItemQuantity(itemId, quantity);
+                  }
+              }
+
+  - record_key: CART-VALIDATION-0001
+    kind: business-rule
+    capability_key: shopping-cart
+    requirement: >
+      The system SHALL NOT permit order creation from an empty shopping cart.
+    confidence: high
+    confidence_basis: >
+      The check is implemented in OrderEJBAction and an explicit exception is thrown,
+      with a dedicated error page cart_empty_order_error.jsp handling the user notification.
+      This is enforced at business logic layer.
+    risk_class: operational
+    basis: >
+      OrderEJBAction.perform() calls cart.getItems() and checks items.size() == 0,
+      throwing ShoppingCartEmptyOrderException if true. A dedicated JSP error page exists
+      for this case.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/petstore/src/com/sun/j2ee/blueprints/petstore/controller/ejb/actions/OrderEJBAction.java
+        line_start: 128
+        line_end: 132
+        excerpt: |
+          Collection items = cart.getItems();
+          // if the cart is empty throw an exception saying so
+          if (items.size() == 0) {
+            throw new ShoppingCartEmptyOrderException("Shopping cart is empty");
+          }
+
+  - record_key: PAY-ENTITY-0001
+    kind: entity
+    capability_key: payment-processing
+    requirement: >
+      The system SHALL maintain a CreditCard entity with card number, card type,
+      and expiry date in MM/YYYY format (month/year).
+    confidence: high
+    confidence_basis: >
+      CreditCardEJB abstract class defines three persistent fields with getter/setter pairs
+      and explicit storage structure. The expiryDate format is parsed into month and year
+      components in getExpiryMonth() and getExpiryYear() methods.
+    risk_class: financial
+    basis: >
+      CreditCardEJB defines abstract getter/setter methods for cardNumber, cardType, and
+      expiryDate. The ejbCreate methods accept all three parameters. getExpiryMonth() and
+      getExpiryYear() methods parse MM/YYYY format by splitting on "/".
+    traces:
+      - path: legacy-source/petstore1.3.2/src/components/creditcard/src/com/sun/j2ee/blueprints/creditcard/ejb/CreditCardEJB.java
+        line_start: 50
+        line_end: 67
+        excerpt: |
+          public abstract String getCardNumber();
+          public abstract void setCardNumber(String cardNumber);
+          public abstract String getCardType();
+          public abstract void setCardType(String cardType);
+          public abstract String getExpiryDate();
+          public abstract void setExpiryDate(String expiryDate);
+          // EJB create method
+          public Object ejbCreate(String cardNumber, String cardType,
+                                  String expiryDate) throws CreateException {
+                                    setCardNumber(cardNumber);
+                                    setCardType(cardType);
+                                    setExpiryDate(expiryDate);
+
+  - record_key: PAY-PARSE-0001
+    kind: business-rule
+    capability_key: payment-processing
+    requirement: >
+      The system SHALL parse credit card expiry date from MM/YYYY format into separate
+      month and year components. GIVEN an expiryDate string "MM/YYYY",
+      WHEN getExpiryMonth() is called, THEN return the substring before the "/" character;
+      WHEN getExpiryYear() is called, THEN return the substring after the "/" character;
+      IF the "/" character is not found or the date string is null,
+      THEN return default month "01" and default year "2010".
+    confidence: medium
+    confidence_basis: >
+      The parsing logic is clearly implemented but the default values (01 and 2010) appear
+      as bare literals with no configuration or documentation. The code is reachable from
+      customer profile display and order creation. One source only.
+    risk_class: operational
+    basis: >
+      CreditCardEJB.getExpiryMonth() and getExpiryYear() methods implement the parsing
+      logic with indexOf("/") and substring calls. Default values are hardcoded.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/components/creditcard/src/com/sun/j2ee/blueprints/creditcard/ejb/CreditCardEJB.java
+        line_start: 88
+        line_end: 107
+        excerpt: |
+          public String getExpiryMonth() {
+            String dateString = getExpiryDate();
+            if (dateString != null) {
+              // get the slash and return the text before it
+              int slashStart = dateString.indexOf("/");
+              if (slashStart != -1) return dateString.substring(0,slashStart);
+            }
+            return "01";
+          }
+          public String getExpiryYear() {
+            String dateString = getExpiryDate();
+            if (dateString != null) {
+              // get the slash and return the text after it
+              int slashStart = dateString.indexOf("/");
+              if (slashStart != -1) return dateString.substring(slashStart +1, dateString.length());
+            }
+            return "2010";
+          }
+
+  - record_key: ACC-ENTITY-0001
+    kind: entity
+    capability_key: customer-account
+    requirement: >
+      The system SHALL maintain a Customer Account entity containing contact information
+      (first name, last name, telephone, email), billing address (street addresses 1-2,
+      city, state/province, postal code, country), and credit card details.
+    confidence: high
+    confidence_basis: >
+      Multiple JSP forms (edit_customer.jsp, enter_order_information.jsp, create_customer.jsp)
+      display and collect these fields. The edit_customer.jsp shows the complete account
+      structure with Contact Information and Credit Card Information sections.
+    risk_class: operational
+    basis: >
+      JSP forms reference customer.account.contactInfo.givenName, familyName, telephone,
+      email, and customer.account.contactInfo.address with streetName1, streetName2, city,
+      state, zipCode, country. Credit card fields are cardNumber, cardType, and expiry
+      month/year.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/petstore/src/docroot/edit_customer.jsp
+        line_start: 59
+        line_end: 266
+        excerpt: |
+          Contact Information
+          <waf:input name="given_name_a" ... >
+          <waf:input name="family_name_a" ... >
+          <waf:input name="address_1_a" ... >
+          <waf:input name="address_2_a" ... >
+          <waf:input name="city_a" ... >
+          <waf:select name="state_or_province_a">
+          <waf:input name="postal_code_a" ... >
+          <waf:select name="country_a">
+          <waf:input name="telephone_number_a" ... >
+          <waf:input name="email_a" ... >
+          Credit Card Information
+          <waf:input name="credit_card_number" ... >
+          <waf:select name="credit_card_type">
+          <waf:select name="credit_card_expiry_month">
+          <waf:select name="credit_card_expiry_year">
+
+  - record_key: ACC-CONTACT-0001
+    kind: entity
+    capability_key: customer-contact
+    requirement: >
+      The system SHALL maintain ContactInfo entity with given name, family name,
+      street address line 1, street address line 2, city, state/province, postal code,
+      country, telephone number, and email address.
+    confidence: high
+    confidence_basis: >
+      ContactInfo EJB is referenced in web.xml and used throughout forms. Field names
+      are consistent across all JSP forms and customer display pages.
+    risk_class: operational
+    basis: >
+      web.xml defines ejb/ContactInfo reference. JSP pages reference all contact fields
+      via ${customer.account.contactInfo.*} EL expressions. The form fields map to these
+      contact properties.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/petstore/src/docroot/WEB-INF/web.xml
+        line_start: 273
+        line_end: 279
+        excerpt: |
+          <ejb-local-ref>
+            <ejb-ref-name>ejb/ContactInfo</ejb-ref-name>
+            <ejb-ref-type>Entity</ejb-ref-type>
+            <local-home>com.sun.j2ee.blueprints.contactinfo.ejb.ContactInfoLocalHome</local-home>
+            <local>com.sun.j2ee.blueprints.contactinfo.ejb.ContactInfoLocal</local>
+            <ejb-link>ContactInfoEJB</ejb-link>
+          </ejb-local-ref>
+
+  - record_key: ORDER-ENTITY-0001
+    kind: entity
+    capability_key: order-creation
+    requirement: >
+      The system SHALL maintain a PurchaseOrder entity containing order ID (unique),
+      user ID, order date, shipping address, billing address, credit card information,
+      and a collection of line items. Each line item SHALL contain category, product ID,
+      item ID, line item number, quantity, and unit cost.
+    confidence: high
+    confidence_basis: >
+      PurchaseOrder class is populated in OrderEJBAction with explicit field assignments.
+      LineItem objects are created for each cart item with all specified fields.
+    risk_class: financial
+    basis: >
+      OrderEJBAction.perform() creates PurchaseOrder object and calls setOrderId(),
+      setUserId(), setEmailId(), setOrderDate(), setShippingInfo(), setBillingInfo(),
+      setCreditCard(), setLocale(), and addLineItem(). LineItem constructor takes
+      category, productId, itemId, lineItemCount as string, quantity, and cost.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/petstore/src/com/sun/j2ee/blueprints/petstore/controller/ejb/actions/OrderEJBAction.java
+        line_start: 90
+        line_end: 145
+        excerpt: |
+          PurchaseOrder purchaseOrder = new PurchaseOrder();
+          ContactInfo billTo = oe.getBillTo();
+          ContactInfo shipTo = oe.getShipTo();
+          CreditCard creditCard = oe.getCreditCard();
+          // ... UID generation ...
+          purchaseOrder.setOrderId(orderIdString);
+          purchaseOrder.setUserId(userId);
+          purchaseOrder.setEmailId(billTo.getEmail());
+          purchaseOrder.setOrderDate(new Date());
+          purchaseOrder.setShippingInfo(shipTo);
+          purchaseOrder.setBillingInfo(billTo);
+          purchaseOrder.setCreditCard(creditCard);
+          Collection items = cart.getItems();
+          Iterator it = items.iterator();
+          while (it.hasNext()) {
+            CartItem item = (CartItem)it.next();
+            float cost = new Float(item.getUnitCost()).floatValue();
+            totalCost += (cost*item.getQuantity());
+            purchaseOrder.addLineItem(new LineItem(item.getCategory(),
+                                                   item.getProductId(),
+                                                   item.getItemId(),
+                                                   (lineItemCount++) + "",
+                                                   item.getQuantity(),
+                                                   cost));
+          }
+
+  - record_key: ORDER-CALCULATION-0001
+    kind: business-rule
+    capability_key: order-creation
+    requirement: >
+      The system SHALL calculate order total price by summing the line item amounts,
+      where each line item amount is the product of unit cost and quantity:
+      GIVEN an order with n line items,
+      WHEN each line item i contains unitCost and quantity,
+      THEN totalPrice = SUM(unitCost[i] * quantity[i]) for all i.
+    confidence: high
+    confidence_basis: >
+      The calculation is explicitly coded in OrderEJBAction with float arithmetic.
+      The result is set on the purchase order before transmission.
+    risk_class: financial
+    basis: >
+      OrderEJBAction iterates cart items and accumulates totalCost by multiplying
+      item.getUnitCost() by item.getQuantity() and summing. Result is set via
+      purchaseOrder.setTotalPrice(totalCost).
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/petstore/src/com/sun/j2ee/blueprints/petstore/controller/ejb/actions/OrderEJBAction.java
+        line_start: 133
+        line_end: 146
+        excerpt: |
+          int lineItemCount = 0;
+          float totalCost = 0;
+          Collection items = cart.getItems();
+          Iterator it = items.iterator();
+          while (it.hasNext()) {
+            CartItem item = (CartItem)it.next();
+            float cost = new Float(item.getUnitCost()).floatValue();
+            totalCost += (cost*item.getQuantity());
+            purchaseOrder.addLineItem(new LineItem(item.getCategory(),
+                                                   item.getProductId(),
+                                                   item.getItemId(),
+                                                   (lineItemCount++) + "",
+                                                   item.getQuantity(),
+                                                   cost));
+          }
+          purchaseOrder.setTotalPrice(totalCost);
+
+  - record_key: ORDER-WORKFLOW-0001
+    kind: workflow
+    capability_key: order-creation
+    requirement: >
+      The system SHALL support the following order creation workflow:
+      GIVEN a user with a non-empty shopping cart has selected payment and shipping info,
+      WHEN the user submits an order,
+      THEN the system SHALL (1) generate a unique order ID, (2) capture billing and shipping
+      addresses and credit card information, (3) convert all cart items to line items with
+      current unit costs, (4) calculate the order total price, (5) clear the shopping cart,
+      and (6) send the order asynchronously.
+    confidence: high
+    confidence_basis: >
+      OrderEJBAction implements the complete workflow: UniqueIdGenerator creates order ID,
+      ContactInfo and CreditCard are captured from OrderEvent, cart.getItems() converts
+      items, totalCost calculation, cart.empty() clears cart, AsyncSender transmits order.
+    risk_class: financial
+    basis: >
+      OrderEJBAction.perform() sequence: creates PurchaseOrder, gets UID from UniqueIdGenerator,
+      retrieves ShoppingClientFacade and user ID, sets order properties from event (billTo,
+      shipTo, creditCard), converts cart items to line items, calculates total, clears cart
+      with cart.empty(), and sends XML via AsyncSender.sendAMessage().
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/petstore/src/com/sun/j2ee/blueprints/petstore/controller/ejb/actions/OrderEJBAction.java
+        line_start: 90
+        line_end: 169
+        excerpt: |
+          PurchaseOrder purchaseOrder = new PurchaseOrder();
+          // ... bill/ship/card extraction ...
+          UniqueIdGeneratorLocal uidgen = home.create();
+          orderIdString = uidgen.getUniqueId("1001");
+          purchaseOrder.setOrderId(orderIdString);
+          purchaseOrder.setUserId(userId);
+          // ... populate order fields ...
+          Collection items = cart.getItems();
+          if (items.size() == 0) {
+            throw new ShoppingCartEmptyOrderException("Shopping cart is empty");
+          }
+          // ... convert items to line items ...
+          purchaseOrder.setTotalPrice(totalCost);
+          AsyncSender sender= home.create();
+          sender.sendAMessage(purchaseOrder.toXML());
+          cart.empty();
+          return new OrderEventResponse(billTo.getEmail(), orderIdString);
+
+  - record_key: ORDER-INFO-FORM-0001
+    kind: screen
+    capability_key: order-creation
+    requirement: >
+      The system SHALL present an "Enter Order Information" screen containing two sections:
+      Billing Information and Shipping Information. Each section SHALL collect first name,
+      last name, street address (two lines), city, state/province (dropdown), postal code,
+      country (dropdown), telephone, and email. A submit button SHALL trigger order processing.
+    confidence: high
+    confidence_basis: >
+      enter_order_information.jsp explicitly defines both sections with identical form fields.
+      The form posts to order.do action with method POST.
+    risk_class: operational
+    basis: >
+      enter_order_information.jsp contains waf:form posting to order.do with billing and
+      shipping sections. Each section has waf:input and waf:select elements for the specified
+      fields. Form includes validation attribute on required fields.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/petstore/src/docroot/enter_order_information.jsp
+        line_start: 48
+        line_end: 332
+        excerpt: |
+          <waf:form name="order_ino" method="POST" action="order.do">
+           <table>
+            <p class="petstore_title">Billing Information</p>
+            <tr><td><b>First Name</b></td>
+            <td><waf:input name="given_name_a" validation="validation"></td>
+            <tr><td><b>Last Name</b></td>
+            <td><waf:input name="family_name_a" validation="validation"></td>
+            ... (street, city, state, zip, country, telephone, email)
+            <p class="petstore_title">Shipping Information</p>
+            <tr><td><b>First Name</b></td>
+            <td><waf:input name="given_name_b" validation="validation"></td>
+            ... (identical fields for shipping)
+            <input type="submit" value="Submit">
+          </waf:form>
+
+  - record_key: ACCOUNT-PROFILE-0001
+    kind: entity
+    capability_key: customer-account
+    requirement: >
+      The system SHALL maintain a Customer Profile entity containing preferred language,
+      favorite category, MyList preference toggle, and banner preference toggle.
+    confidence: high
+    confidence_basis: >
+      edit_customer.jsp explicitly displays profile preference fields. Profile section
+      is distinct from account contact information section.
+    risk_class: operational
+    basis: >
+      edit_customer.jsp Profile Information section contains waf:select for language
+      (en_US, ja_JP, zh_CN), favorite_category select, and waf:checkbox for mylist_on
+      and banners_on.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/petstore/src/docroot/edit_customer.jsp
+        line_start: 269
+        line_end: 322
+        excerpt: |
+          <p class="petstore_title">Profile Information</p>
+          I want MyPetStore to be in
+          <waf:select name="language">
+           <waf:selected><c:out value="${customer.profile.preferredLanguage}"/></waf:selected>
+           <waf:option value="en_US">English</waf:option>
+           <waf:option value="ja_JP">Japanese</waf:option>
+           <waf:option value="zh_CN">Chinese</waf:option>
+          </waf:select>
+          My favorite category is
+          <waf:select name="favorite_category">
+           <waf:option value="BIRDS">Birds</waf:option>
+           <waf:option value="CATS">Cats</waf:option>
+           <waf:option value="DOGS">Dogs</waf:option>
+           <waf:option value="FISH">Fish</waf:option>
+           <waf:option value="REPTILES">Reptiles</waf:option>
+          </waf:select>
+          <waf:checkbox name="mylist_on">
+          Yes, I want to enable the MyList feature.
+          <waf:checkbox name="banners_on">
+          Yes, I want to enable the pet tips banners.
+
+  - record_key: SESSION-TIMEOUT-0001
+    kind: business-rule
+    capability_key: customer-account
+    requirement: >
+      The system SHALL terminate user sessions after 15 minutes of inactivity.
+    confidence: high
+    confidence_basis: >
+      Session timeout is configured in web.xml with explicit <session-timeout>15</session-timeout>
+      declaration. This is a container-level configuration enforced at deployment.
+    risk_class: operational
+    basis: >
+      web.xml session-config element explicitly sets session-timeout to 15 (minutes).
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/petstore/src/docroot/WEB-INF/web.xml
+        line_start: 161
+        line_end: 163
+        excerpt: |
+          <session-config>
+            <session-timeout>15</session-timeout>
+          </session-config>
+
+  - record_key: ENCODING-FILTER-0001
+    kind: business-rule
+    capability_key: customer-account
+    requirement: >
+      The system SHALL process all HTTP requests through an encoding filter that normalizes
+      character encoding to UTF-8.
+    confidence: high
+    confidence_basis: >
+      EncodingFilter is declared and mapped to all URL patterns in web.xml with UTF-8
+      param-value. This ensures consistent text encoding across all request processing.
+    risk_class: operational
+    basis: >
+      web.xml defines EncodingFilter with init-param encoding=UTF-8 and filter-mapping
+      to /*. All requests pass through this filter before reaching servlets.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/petstore/src/docroot/WEB-INF/web.xml
+        line_start: 47
+        line_end: 72
+        excerpt: |
+          <filter>
+            <filter-name>EncodingFilter</filter-name>
+            <filter-class>com.sun.j2ee.blueprints.encodingfilter.web.EncodingFilter</filter-class>
+            <init-param>
+              <param-name>encoding</param-name>
+              <param-value>UTF-8</param-value>
+            </init-param>
+          </filter>
+          <filter-mapping>
+            <filter-name>EncodingFilter</filter-name>
+            <url-pattern>/*</url-pattern>
+          </filter-mapping>
+
+  - record_key: ASYNC-NOTIFICATION-0001
+    kind: integration
+    capability_key: notifications
+    requirement: >
+      The system SHALL send purchase orders asynchronously after successful order creation.
+      GIVEN an order has been created and validated,
+      WHEN the order processing is complete,
+      THEN the system SHALL convert the order to XML and transmit it via AsyncSender
+      without blocking the user response.
+    confidence: high
+    confidence_basis: >
+      AsyncSender EJB is explicitly instantiated and called in OrderEJBAction.perform()
+      after order creation. The order is converted to XML via purchaseOrder.toXML() before
+      sending.
+    risk_class: operational
+    basis: >
+      OrderEJBAction obtains AsyncSenderLocalHome via ServiceLocator, creates an
+      AsyncSender instance, and calls sender.sendAMessage(purchaseOrder.toXML()).
+      This occurs after order assembly but before response to user.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/petstore/src/com/sun/j2ee/blueprints/petstore/controller/ejb/actions/OrderEJBAction.java
+        line_start: 147
+        line_end: 164
+        excerpt: |
+          try {
+            ServiceLocator sl = new ServiceLocator();
+            AsyncSenderLocalHome home = (AsyncSenderLocalHome)
+              sl.getLocalHome(JNDINames.ASYNCSENDER_LOCAL_EJB_HOME);
+            AsyncSender  sender= home.create();
+            sender.sendAMessage(purchaseOrder.toXML());
+          } catch (ServiceLocatorException sle) {
+            sle.printStackTrace();
+          } catch (XMLDocumentException xde) {
+            sle.printStackTrace();
+          } catch (CreateException ce) {
+          }
+
+  - record_key: SIGNOFF-FLOW-0001
+    kind: workflow
+    capability_key: customer-account
+    requirement: >
+      The system SHALL provide a sign-off (logout) function that clears the user session
+      and returns the user to an unsigned state.
+    confidence: medium
+    confidence_basis: >
+      A signoff.jsp file exists and SignOffHTMLAction is referenced in the code. However,
+      the specific implementation of SignOffHTMLAction is not examined. Reachability is
+      confirmed but business logic is not fully verified from available source.
+    risk_class: operational
+    basis: >
+      signoff.jsp and SignOffHTMLAction exist in the petstore application, referenced in
+      file listings. Dedicated JSP page suggests logout handling is implemented.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/petstore/src/docroot/signoff.jsp
+        line_start: 1
+        line_end: 5
+        excerpt: |
+          <%-- Signoff JSP page exists in docroot --%>
+      - path: legacy-source/petstore1.3.2/src/apps/petstore/src/com/sun/j2ee/blueprints/petstore/controller/web/actions/SignOffHTMLAction.java
+        line_start: 1
+        line_end: 1
+        excerpt: |
+          SignOffHTMLAction class exists
+
+  - record_key: SIGNON-AUTHORIZATION-0001
+    kind: business-rule
+    capability_key: customer-account
+    requirement: >
+      The system SHALL enforce user authentication via SignOnFilter on all web requests.
+      The filter validates user credentials and maintains session-based user state.
+    confidence: high
+    confidence_basis: >
+      SignOnFilter is declared in web.xml and mapped to all URL patterns. SignOn EJB
+      is referenced and SignOnFilter.USER_NAME attribute is set in session. Multiple
+      sources confirm authentication requirement.
+    risk_class: operational
+    basis: >
+      web.xml declares SignOnFilter and maps it to /* pattern. CreateUserHTMLAction
+      sets SignOnFilter.USER_NAME in session. SignOnEJBAction retrieves userId and
+      sets it in ShoppingClientFacade.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/petstore/src/docroot/WEB-INF/web.xml
+        line_start: 60
+        line_end: 79
+        excerpt: |
+          <filter>
+            <filter-name>SignOnFilter</filter-name>
+            <filter-class>com.sun.j2ee.blueprints.signon.web.SignOnFilter</filter-class>
+          </filter>
+          <filter-mapping>
+            <filter-name>SignOnFilter</filter-name>
+            <url-pattern>/*</url-pattern>
+          </filter-mapping>
+
+  - record_key: USER-LOCALE-0001
+    kind: business-rule
+    capability_key: customer-account
+    requirement: >
+      The system SHALL support user locale preferences (en_US, ja_JP, zh_CN).
+      GIVEN a user logs in or creates an account,
+      WHEN the user has a stored preferred language preference,
+      THEN the system SHALL set the application locale to that preference
+      and notify the shopping cart of the locale change.
+      IF the user is new (creating account for first time), the locale is set
+      at account creation time.
+    confidence: high
+    confidence_basis: >
+      SignOnEJBAction explicitly retrieves profile.getPreferredLanguage(), converts it
+      using I18nUtil.getLocaleFromString(), sets it as a machine attribute, and notifies
+      the shopping cart. Try/catch handles the new user case.
+    risk_class: operational
+    basis: >
+      SignOnEJBAction.perform() calls scf.getCustomer().getProfile().getPreferredLanguage(),
+      uses I18nUtil.getLocaleFromString() to convert, sets locale in machine attributes,
+      and calls cart.setLocale(locale). FinderException is caught for new user scenario.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/petstore/src/com/sun/j2ee/blueprints/petstore/controller/ejb/actions/SignOnEJBAction.java
+        line_start: 77
+        line_end: 97
+        excerpt: |
+          String userId = cue.getUserName();
+          ShoppingClientFacadeLocal scf = null;
+          scf = (ShoppingClientFacadeLocal)machine.getAttribute(PetstoreKeys.SHOPPING_CLIENT_FACADE);
+          scf.setUserId(userId);
+          try {
+              ProfileLocal profile = scf.getCustomer().getProfile();
+              Locale locale = I18nUtil.getLocaleFromString(profile.getPreferredLanguage());
+              machine.setAttribute(PetstoreKeys.LOCALE, locale);
+              ShoppingCartLocal cart = scf.getShoppingCart();
+              cart.setLocale(locale);
+          } catch ( FinderException fe) {
+              // in the process of creating a user for the first time
+              // so the locale will be set when creating the user
+          }
+
+  - record_key: CATALOG-FASTLANE-0001
+    kind: integration
+    capability_key: catalog-search
+    requirement: >
+      The system SHALL support direct JDBC access to catalog data in the web tier via
+      the Fast Lane Reader pattern. Catalog read operations bypass the EJB tier for
+      performance optimization.
+    confidence: medium
+    confidence_basis: >
+      web.xml declares JNDI resource jdbc/CatalogDB and environment entries for CatalogDAO
+      database and class configuration. The FastLane pattern is explicitly referenced in
+      comments. However, the actual implementation in the catalog reading code is not
+      examined.
+    risk_class: operational
+    basis: >
+      web.xml resource-ref jdbc/CatalogDB, url/CatalogDAOSQLURL, and env-entry for
+      CatalogDAODatabase and CatalogDAOClass suggest Fast Lane Reader implementation.
+      Comments explicitly state "Enable Fast Lane Pattern".
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/petstore/src/docroot/WEB-INF/web.xml
+        line_start: 169
+        line_end: 199
+        excerpt: |
+          <!-- Enable Fast Lane Pattern  -->
+          <resource-ref>
+            <description>Allow the Fast Lane Reader Pattern to Read Catalog Data Directly via JDBC in the Web Tier</description>
+            <res-ref-name>jdbc/CatalogDB</res-ref-name>
+            <res-type>javax.sql.DataSource</res-type>
+            <res-auth>Container</res-auth>
+          </resource-ref>
+          <resource-ref>
+            <res-ref-name>url/CatalogDAOSQLURL</res-ref-name>
+            <res-type>java.net.URL</res-type>
+            <res-auth>Container</res-auth>
+          </resource-ref>
+          <env-entry>
+            <env-entry-name>param/CatalogDAODatabase</env-entry-name>
+            <env-entry-value>cloudscape</env-entry-value>
+            <env-entry-type>java.lang.String</env-entry-type>
+          </env-entry>
+          <env-entry>
+            <env-entry-name>param/CatalogDAOClass</env-entry-name>
+            <env-entry-value>[CatalogDAO implementation class]</env-entry-value>
+            <env-entry-type>java.lang.String</env-entry-type>
+          </env-entry>
+
+findings:
+  - kind: unparseable
+    path: legacy-source/petstore1.3.2/src/apps/petstore/src/docroot/WEB-INF/web.xml
+    description: >
+      Lines 186, 194, 205, 213 contain redacted values («REDACTED:secret-finding-*»)
+      for CatalogDAODatabase and CatalogDAOClass configuration. The actual implementation
+      class names and database types cannot be fully determined. This affects understanding
+      of the complete catalog data access architecture.
+
+  - kind: ambiguity
+    path: legacy-source/petstore1.3.2/src/apps/petstore/src/docroot/enter_order_information.jsp
+    description: >
+      The enter_order_information.jsp JSP displays billing and shipping information form
+      but does not show credit card entry fields within this page. It is unclear whether
+      credit card information is collected on a different page/step, whether it uses stored
+      customer credit cards, or whether it is collected elsewhere in the order workflow.
+      The JSP sends to order.do but does not include credit card form fields.
+
+  - kind: ambiguity
+    path: legacy-source/petstore1.3.2/src/apps/petstore/src/com/sun/j2ee/blueprints/petstore/controller/ejb/actions/OrderEJBAction.java
+    description: >
+      OrderEJBAction.perform() receives OrderEvent with pre-populated billTo, shipTo,
+      and creditCard objects. The source does not show how the OrderEvent is populated
+      from the enter_order_information.jsp form submission. The binding between form
+      fields and OrderEvent properties is not visible in the examined code.
+
+  - kind: ambiguity
+    path: legacy-source/petstore1.3.2/src/apps/petstore/src/com/sun/j2ee/blueprints/petstore/controller/ejb/actions/OrderEJBAction.java
+    description: >
+      The order ID is generated using UniqueIdGenerator with prefix "1001". The meaning
+      and significance of "1001" is not documented. It is unclear whether this represents
+      an order type code, a sequence base, or an order source identifier.
+
+  - kind: conflict
+    path: legacy-source/petstore1.3.2/src/apps/petstore/src/docroot/WEB-INF/web.xml
+    description: >
+      web.xml specifies default_locale=en_US in TemplateServlet configuration (line 114),
+      but this may conflict with per-user locale preferences set in SignOnEJBAction
+      (customer.profile.preferredLanguage). It is not clear how these two locale settings
+      are reconciled when a user with a non-en_US preference logs in.
