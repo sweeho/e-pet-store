@@ -1,0 +1,631 @@
+records:
+  - record_key: ORDER-WORKFLOW-0001
+    kind: workflow
+    capability_key: order-fulfillment
+    requirement: >
+      The system SHALL process purchase orders through a multi-stage workflow:
+      WHEN a purchase order message is received THEN the system creates a PurchaseOrder
+      entity, initializes its status, and transitions it through approval and fulfillment
+      stages via the ProcessManager.
+    confidence: high
+    confidence_basis: >
+      Both ejb-jar.xml (lines 110-198) and PurchaseOrderMDB.java (lines 71-100) explicitly
+      define PurchaseOrderMDB receiving messages from Java Pet Store and creating PurchaseOrder
+      EJB entities. ProcessManager integration is hardcoded in both files. The workflow is
+      enforced at container level with Required transactions.
+    risk_class: operational
+    basis: >
+      ejb-jar.xml defines PurchaseOrderMDB listening to jms/OrderApprovalQueue with
+      ProcessManager EJB local reference. PurchaseOrderMDB.java shows ejbCreate() instantiates
+      processManager and poHome, establishing the workflow infrastructure.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/opc/src/ejb-jar.xml
+        line_start: 110
+        line_end: 198
+        excerpt: |
+          <!-- Process recieving a PO from the Java Pet Store Start-->
+            <message-driven>
+              <description>opc node to process PurchaseOrders from the Java Pet Store</description>
+              <display-name>PurchaseOrderMDB</display-name>
+              <ejb-name>PurchaseOrderMDB</ejb-name>
+              <ejb-class>com.sun.j2ee.blueprints.opc.ejb.PurchaseOrderMDB</ejb-class>
+              <transaction-type>Container</transaction-type>
+              <message-driven-destination>
+                <destination-type>javax.jms.Queue</destination-type>
+              </message-driven-destination>
+              <ejb-local-ref>
+                <ejb-ref-name>ejb/ProcessManager</ejb-ref-name>
+      - path: legacy-source/petstore1.3.2/src/apps/opc/src/com/sun/j2ee/blueprints/opc/ejb/PurchaseOrderMDB.java
+        line_start: 71
+        line_end: 100
+        excerpt: |
+          public class PurchaseOrderMDB implements MessageDrivenBean, MessageListener {
+            private ProcessManagerLocal processManager;
+            private PurchaseOrderLocalHome poHome;
+            public void ejbCreate() {
+              ServiceLocator serviceLocator = new ServiceLocator();
+              poHome = (PurchaseOrderLocalHome)serviceLocator.getLocalHome(JNDINames.PURCHASE_ORDER_EJB);
+              ProcessManagerLocalHome pmlh = (ProcessManagerLocalHome)serviceLocator.getLocalHome(JNDINames.PROCESS_MANAGER_EJB);
+              processManager = pmlh.create();
+
+  - record_key: APPROVAL-WORKFLOW-0001
+    kind: workflow
+    capability_key: order-approval
+    requirement: >
+      The system SHALL process order approvals from Admin through OrderApprovalMDB.
+      WHEN order approval messages are received THEN the system updates purchase order
+      status in the ProcessManager and routes approved orders to supplier via
+      PurchaseOrderQueue, while routing approval notifications to customer relations
+      via MailOrderApprovalQueue.
+    confidence: high
+    confidence_basis: >
+      ejb-jar.xml lines 297-399 explicitly declare OrderApprovalMDB with references to
+      ProcessManager, resource references to jms/OrderApprovalQueue (input), jms/PurchaseOrderQueue
+      (to supplier), and jms/OrderApprovalMailQueue (to customer relations). Two independent
+      message routing paths are configured at deployment time.
+    risk_class: operational
+    basis: >
+      OrderApprovalMDB configuration shows container-managed transactions with Required
+      attribute, integration with multiple queue destinations for workflow branching.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/opc/src/ejb-jar.xml
+        line_start: 297
+        line_end: 399
+        excerpt: |
+          <!-- Process recieving a list of OrderApprovals from the Admin Start-->
+            <message-driven>
+              <description>opc node to process OrderApprovals from the Admin</description>
+              <display-name>OrderApprovalMDB</display-name>
+              <ejb-name>OrderApprovalMDB</ejb-name>
+              <ejb-class>com.sun.j2ee.blueprints.opc.ejb.OrderApprovalMDB</ejb-class>
+              <transaction-type>Container</transaction-type>
+              <message-driven-destination>
+                <destination-type>javax.jms.Queue</destination-type>
+              </message-driven-destination>
+              <resource-env-ref>
+                <resource-env-ref-name>jms/OrderApprovalMailQueue</resource-env-ref-name>
+              <resource-env-ref>
+                <resource-env-ref-name>jms/PurchaseOrderQueue</resource-env-ref-name>
+
+  - record_key: INVOICE-WORKFLOW-0001
+    kind: workflow
+    capability_key: order-fulfillment
+    requirement: >
+      The system SHALL process invoice messages from suppliers through InvoiceMDB
+      listening to a JMS Topic. WHEN an invoice is received THEN the system updates
+      the purchase order status and routes a completion message to MailCompletedOrderQueue
+      for customer notification.
+    confidence: high
+    confidence_basis: >
+      ejb-jar.xml lines 201-295 declare InvoiceMDB as a Topic subscriber (not a Queue
+      consumer), explicitly routing to jms/CompletedOrderMailQueue. InvoiceMDB.java confirms
+      integration with ProcessManager and PurchaseOrder entities. Topic-based subscription
+      allows multiple consumers of same invoice event.
+    risk_class: operational
+    basis: >
+      InvoiceMDB configuration shows container-managed transactions, Topic destination type,
+      and resource references to both order and mail processing queues.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/opc/src/ejb-jar.xml
+        line_start: 201
+        line_end: 295
+        excerpt: |
+          <!-- Process recieving an INVOICE from the Suppler Start-->
+            <message-driven>
+              <description>opc node to process Invoice from the Supplier</description>
+              <display-name>InvoiceMDB</display-name>
+              <ejb-name>InvoiceMDB</ejb-name>
+              <ejb-class>com.sun.j2ee.blueprints.opc.ejb.InvoiceMDB</ejb-class>
+              <message-driven-destination>
+                <destination-type>javax.jms.Topic</destination-type>
+              </message-driven-destination>
+              <resource-env-ref>
+                <resource-env-ref-name>jms/CompletedOrderMailQueue</resource-env-ref-name>
+
+  - record_key: VALIDATION-XML-0001
+    kind: business-rule
+    capability_key: order-creation
+    requirement: >
+      The system SHOULD validate purchase order XML documents against a schema during
+      message processing. GIVEN param/xml/validation/PurchaseOrder configuration is true
+      THEN XML validation SHALL be performed before order processing begins.
+    confidence: medium
+    confidence_basis: >
+      ejb-jar.xml line 121-124 defines env-entry for param/xml/validation/PurchaseOrder
+      with type Boolean and redacted value. PurchaseOrderMDB.java line 79, 92 shows
+      validateXmlPurchaseOrder flag is retrieved and used. The validation is optional
+      (configurable boolean) and enforced through environment entry lookup.
+    risk_class: operational
+    basis: >
+      Declarative configuration in ejb-jar.xml combined with programmatic use in
+      PurchaseOrderMDB ejbCreate() method shows validation is conditional on configuration.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/opc/src/ejb-jar.xml
+        line_start: 120
+        line_end: 124
+        excerpt: |
+          <env-entry>
+           <env-entry-name>param/xml/validation/PurchaseOrder</env-entry-name>
+           <env-entry-type>java.lang.Boolean</env-entry-type>
+           <env-entry-value>«REDACTED:secret-finding-2»</env-entry-value>
+          </env-entry>
+      - path: legacy-source/petstore1.3.2/src/apps/opc/src/com/sun/j2ee/blueprints/opc/ejb/PurchaseOrderMDB.java
+        line_start: 79
+        line_end: 94
+        excerpt: |
+          private boolean validateXmlPurchaseOrder;
+          public void ejbCreate() {
+            validateXmlPurchaseOrder = serviceLocator.getBoolean(JNDINames.XML_VALIDATION_PURCHASE_ORDER);
+
+  - record_key: VALIDATION-INVOICE-0001
+    kind: business-rule
+    capability_key: order-fulfillment
+    requirement: >
+      The system SHOULD validate invoice XML documents. GIVEN param/xml/validation/Invoice
+      configuration is true THEN invoice XML validation SHALL be performed. Additionally,
+      XSD validation MAY be performed GIVEN param/xml/XSDValidation is true.
+    confidence: medium
+    confidence_basis: >
+      ejb-jar.xml lines 212-221 define two separate boolean environment entries for Invoice
+      validation and XSD validation. InvoiceMDB.java line 92-94 shows both are retrieved and
+      passed to TPAInvoiceXDE constructor, indicating two levels of validation. Redacted
+      values prevent seeing default configuration state.
+    risk_class: operational
+    basis: >
+      Two independent configuration entries suggest invoice processing requires stricter
+      validation than purchase orders, with optional XSD schema validation layer.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/opc/src/ejb-jar.xml
+        line_start: 212
+        line_end: 221
+        excerpt: |
+          <env-entry>
+           <env-entry-name>param/xml/validation/Invoice</env-entry-name>
+           <env-entry-type>java.lang.Boolean</env-entry-type>
+           <env-entry-value>«REDACTED:secret-finding-3»</env-entry-value>
+          </env-entry>
+          <env-entry>
+           <env-entry-name>param/xml/XSDValidation</env-entry-name>
+           <env-entry-type>java.lang.Boolean</env-entry-type>
+           <env-entry-value>«REDACTED:secret-finding-4»</env-entry-value>
+          </env-entry>
+
+  - record_key: ADMIN-QUERY-0001
+    kind: requirement
+    capability_key: admin-operations
+    requirement: >
+      The system SHALL provide an admin interface to query orders by status. WHEN
+      OPCAdminFacadeEJB.getOrdersByStatus(status) is called THEN it returns a collection
+      of OrderDetails objects containing order ID, user ID, order date (formatted as MM/DD/YYYY),
+      order value, and status for all orders matching the given status.
+    confidence: high
+    confidence_basis: >
+      OPCAdminFacadeEJB.java lines 131-149 show the complete implementation of
+      getOrdersByStatus method with explicit transformation of order data into OrderDetails
+      objects. The method signature and return type are declared in ejb-jar.xml lines 776-786
+      as a Remote business method with Required transaction attribute.
+    risk_class: operational
+    basis: >
+      Both declarative (ejb-jar.xml) and programmatic (OPCAdminFacadeEJB.java) sources
+      document the same requirement. Date formatting logic (month+1, year+1900) is
+      explicit in the code.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/opc/src/ejb-jar.xml
+        line_start: 776
+        line_end: 786
+        excerpt: |
+          <container-transaction>
+            <method>
+              <ejb-name>OPCAdminFacadeEJB</ejb-name>
+              <method-intf>Remote</method-intf>
+              <method-name>getOrdersByStatus</method-name>
+              <method-params>
+                <method-param>java.lang.String</method-param>
+              </method-params>
+            </method>
+            <trans-attribute>Required</trans-attribute>
+          </container-transaction>
+      - path: legacy-source/petstore1.3.2/src/apps/opc/src/com/sun/j2ee/blueprints/opc/admin/ejb/OPCAdminFacadeEJB.java
+        line_start: 131
+        line_end: 149
+        excerpt: |
+          public OrdersTO getOrdersByStatus(String status) throws OPCAdminFacadeException {
+            OrdersTO.MutableOrdersTO retVal = new OrdersTO.MutableOrdersTO();
+            PurchaseOrderLocal po;
+            Collection orders = mgr.getOrdersByStatus(status);
+            while((it!= null) && (it.hasNext())) {
+              MailInvoiceMDB.java shows formatting: "Date gotDate = new Date(po.getPoDate());
+              String podate = (gotDate.getMonth()+1) + "/" + gotDate.getDate() + "/" + (gotDate.getYear()+1900);
+              retVal.add(new OrderDetails(po.getPoId(), po.getPoUserId(), podate, po.getPoValue(), status));
+
+  - record_key: ADMIN-ANALYTICS-0001
+    kind: requirement
+    capability_key: admin-operations
+    requirement: >
+      The system SHALL provide charting/analytics data to admin users. WHEN
+      OPCAdminFacadeEJB.getChartInfo(status, startDate, endDate, chartType) is called
+      THEN it returns order analytics data for the specified date range and chart type.
+    confidence: medium
+    confidence_basis: >
+      ejb-jar.xml lines 787-800 declare the getChartInfo method signature with four
+      parameters (status String, startDate Date, endDate Date, chartType String) and
+      Required transaction attribute. Method exists in deployment descriptor but
+      implementation details are not visible in the available code excerpt (line 150
+      is the limit of OPCAdminFacadeEJB.java read).
+    risk_class: operational
+    basis: >
+      Declarative configuration in ejb-jar.xml fully specifies the interface contract.
+      Parameter names and types are explicit. Implementation logic not yet examined.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/opc/src/ejb-jar.xml
+        line_start: 787
+        line_end: 800
+        excerpt: |
+          <container-transaction>
+            <method>
+              <ejb-name>OPCAdminFacadeEJB</ejb-name>
+              <method-intf>Remote</method-intf>
+              <method-name>getChartInfo</method-name>
+              <method-params>
+                <method-param>java.lang.String</method-param>
+                <method-param>java.util.Date</method-param>
+                <method-param>java.util.Date</method-param>
+                <method-param>java.lang.String</method-param>
+              </method-params>
+            </method>
+            <trans-attribute>Required</trans-attribute>
+          </container-transaction>
+
+  - record_key: TRANSACTION-SEMANTIC-0001
+    kind: business-rule
+    capability_key: order-fulfillment
+    requirement: >
+      All message-driven bean onMessage() methods SHALL execute within a container-managed
+      transaction with Required semantics. GIVEN a message arrives at the destination THEN
+      the container SHALL initiate a transaction before invoking onMessage(), commit on
+      successful completion, and rollback on exception.
+    confidence: high
+    confidence_basis: >
+      ejb-jar.xml explicitly declares transaction-type as Container for all six MDBs
+      (lines 116, 207, 303, 410, 500, 586) and container-transaction elements with
+      trans-attribute Required for each onMessage() method (lines 708-773). This is
+      a declarative requirement enforced by the EJB container itself.
+    risk_class: operational
+    basis: >
+      EJB 2.0 deployment descriptor with explicit container-transaction declarations
+      for every MDB's onMessage method. Required attribute means a transaction must
+      be active for each message processing.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/opc/src/ejb-jar.xml
+        line_start: 708
+        line_end: 773
+        excerpt: |
+          <container-transaction>
+            <method>
+              <ejb-name>PurchaseOrderMDB</ejb-name>
+              <method-name>onMessage</method-name>
+              <method-params>
+                <method-param>javax.jms.Message</method-param>
+              </method-params>
+            </method>
+            <trans-attribute>Required</trans-attribute>
+          </container-transaction>
+          ... (repeated for OrderApprovalMDB, InvoiceMDB, MailInvoiceMDB, MailOrderApprovalMDB, MailCompletedOrderMDB)
+
+  - record_key: ACCESS-CONTROL-0001
+    kind: business-rule
+    capability_key: admin-operations
+    requirement: >
+      All EJB methods in the OPC module SHALL be accessible without role-based
+      authorization. GIVEN any caller attempts to invoke an EJB method THEN the
+      container SHALL permit the invocation (unchecked security).
+    confidence: high
+    confidence_basis: >
+      ejb-jar.xml assembly-descriptor section (lines 657-706) declares method-permission
+      elements with unchecked tag for all seven EJB beans: OPCAdminFacadeEJB,
+      PurchaseOrderMDB, InvoiceMDB, OrderApprovalMDB, MailInvoiceMDB, MailOrderApprovalMDB,
+      MailCompletedOrderMDB. Each grants * (all methods) unchecked access.
+    risk_class: operational
+    basis: >
+      Declarative security configuration in EJB deployment descriptor using unchecked
+      elements for all enterprise beans.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/opc/src/ejb-jar.xml
+        line_start: 657
+        line_end: 706
+        excerpt: |
+          <assembly-descriptor>
+            <method-permission>
+              <unchecked />
+              <method>
+                  <ejb-name>OPCAdminFacadeEJB</ejb-name>
+                <method-name>*</method-name>
+              </method>
+            </method-permission>
+            ... (repeated for all MDBs with unchecked permission)
+
+  - record_key: DATA-MODEL-0001
+    kind: entity
+    capability_key: order-creation
+    requirement: >
+      The system SHALL maintain PurchaseOrder entities with the following attributes:
+      poId (primary key, VARCHAR), poUserId (VARCHAR), poDate (LONGINT, NOT NULL),
+      poEmailId (VARCHAR), poLocale (VARCHAR), poValue (REAL, NOT NULL),
+      plus relationships to ContactInfo, CreditCard, and LineItems collection.
+    confidence: high
+    confidence_basis: >
+      sun-j2ee-ri.xml lines 627-654 contains the complete CMP mapping including CREATE
+      TABLE statement defining all column types and constraints. The schema is explicit
+      and enforced at database level with NOT NULL constraints on poDate and poValue,
+      and PRIMARY KEY constraint on poId.
+    risk_class: operational
+    basis: >
+      SQL DDL from container-specific deployment descriptor (sun-j2ee-ri.xml) shows
+      actual database schema implementation.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/opc/src/sun-j2ee-ri.xml
+        line_start: 640
+        line_end: 654
+        excerpt: |
+          <sql>INSERT INTO "PurchaseOrderEJBTable" ( "_contactInfo___PMPrimaryKey" , "_creditCard___PMPrimaryKey" , "poDate" , "poEmailId" , "poId" , "poLocale" , "poUserId" , "poValue" ) VALUES (  ?  ,  ?  ,  ?  ,  ?  ,  ?  ,  ?  ,  ?  ,  ?  )</sql>
+          <sql>CREATE TABLE "PurchaseOrderEJBTable" ("_contactInfo___PMPrimaryKey" LONGINT , "_creditCard___PMPrimaryKey" LONGINT , "poDate" LONGINT NOT NULL , "poEmailId" VARCHAR(255) , "poId" VARCHAR(255) , "poLocale" VARCHAR(255) , "poUserId" VARCHAR(255) , "poValue" REAL NOT NULL, CONSTRAINT "pk_PurchaseOrderEJBTabl" PRIMARY KEY ("poId") )</sql>
+
+  - record_key: DATA-MODEL-0002
+    kind: entity
+    capability_key: order-creation
+    requirement: >
+      The system SHALL maintain LineItem entities with the following attributes:
+      primary key (__PMPrimaryKey LONGINT), lineNumber, productId, categoryId, itemId,
+      quantity (INTEGER, NOT NULL), quantityShipped (INTEGER, NOT NULL),
+      unitPrice (REAL, NOT NULL), with a many-to-one relationship to PurchaseOrder.
+    confidence: high
+    confidence_basis: >
+      sun-j2ee-ri.xml lines 689-703 contain the CMP mapping and CREATE TABLE statement
+      for LineItemEJBTable showing all columns with types. NOT NULL constraints on
+      quantity, quantityShipped, unitPrice indicate required fields.
+    risk_class: operational
+    basis: >
+      SQL schema definition from sun-j2ee-ri.xml explicitly defines all fields and constraints.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/opc/src/sun-j2ee-ri.xml
+        line_start: 689
+        line_end: 703
+        excerpt: |
+          <sql>INSERT INTO "LineItemEJBTable" ( "__PMPrimaryKey" , "categoryId" , "itemId" , "lineNumber" , "productId" , "quantity" , "quantityShipped" , "unitPrice" ) VALUES (  ?  ,  ?  ,  ?  ,  ?  ,  ?  ,  ?  ,  ?  ,  ?  )</sql>
+          <sql>CREATE TABLE "LineItemEJBTable" ("__PMPrimaryKey" LONGINT , "categoryId" VARCHAR(255) , "itemId" VARCHAR(255) , "lineNumber" VARCHAR(255) , "productId" VARCHAR(255) , "quantity" INTEGER NOT NULL , "quantityShipped" INTEGER NOT NULL , "unitPrice" REAL NOT NULL, CONSTRAINT "pk_LineItemEJBTabl" PRIMARY KEY ("__PMPrimaryKey") )</sql>
+
+  - record_key: DATA-MODEL-0003
+    kind: entity
+    capability_key: payment-processing
+    requirement: >
+      The system SHALL maintain CreditCard entities with the following attributes:
+      primary key (__PMPrimaryKey LONGINT), cardNumber (VARCHAR), cardType (VARCHAR),
+      expiryDate (VARCHAR), with a relationship to PurchaseOrder.
+    confidence: high
+    confidence_basis: >
+      sun-j2ee-ri.xml lines 725-740 define the CMP mapping and CREATE TABLE statement
+      for CreditCardEJBTable with explicit column definitions.
+    risk_class: financial
+    basis: >
+      SQL schema from sun-j2ee-ri.xml shows payment card data persistence structure.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/opc/src/sun-j2ee-ri.xml
+        line_start: 725
+        line_end: 740
+        excerpt: |
+          <sql>INSERT INTO "CreditCardEJBTable" ( "__PMPrimaryKey" , "__reverse_creditCard_poId" , "cardNumber" , "cardType" , "expiryDate" ) VALUES (  ?  ,  ?  ,  ?  ,  ?  ,  ?  )</sql>
+          <sql>CREATE TABLE "CreditCardEJBTable" ("__PMPrimaryKey" LONGINT , "__reverse_creditCard_poId" VARCHAR(255) , "cardNumber" VARCHAR(255) , "cardType" VARCHAR(255) , "expiryDate" VARCHAR(255), CONSTRAINT "pk_CreditCardEJBTabl" PRIMARY KEY ("__PMPrimaryKey") )</sql>
+
+  - record_key: NOTIFICATION-INVOICE-0001
+    kind: requirement
+    capability_key: notifications
+    requirement: >
+      The system SHOULD send email confirmations for invoices. GIVEN MailInvoiceMDB
+      is enabled and param/SendConfirmationMail is true THEN invoice receipt confirmations
+      SHALL be sent to customers.
+    confidence: medium
+    confidence_basis: >
+      ejb-jar.xml lines 414-418 define param/SendConfirmationMail environment entry
+      (configurable Boolean, value redacted). MailInvoiceMDB.java would read this flag
+      to decide whether to send confirmation emails. Configuration suggests behavior is
+      optional and controllable at deployment time.
+    risk_class: operational
+    basis: >
+      Configuration parameter in ejb-jar.xml with Boolean type indicates optional email
+      confirmation feature for invoice processing.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/opc/src/ejb-jar.xml
+        line_start: 414
+        line_end: 418
+        excerpt: |
+          <env-entry>
+           <env-entry-name>param/SendConfirmationMail</env-entry-name>
+           <env-entry-type>java.lang.Boolean</env-entry-type>
+           <env-entry-value>«REDACTED:secret-finding-8»</env-entry-value>
+          </env-entry>
+
+  - record_key: NOTIFICATION-APPROVAL-0001
+    kind: requirement
+    capability_key: notifications
+    requirement: >
+      The system SHOULD send email notifications for order approvals. GIVEN
+      MailOrderApprovalMDB is enabled and param/SendApprovalMail is true THEN order
+      approval notifications SHALL be sent to customers.
+    confidence: medium
+    confidence_basis: >
+      ejb-jar.xml lines 504-507 define param/SendApprovalMail environment entry
+      (configurable Boolean). MailOrderApprovalMDB processes approval queue messages
+      and uses this configuration to decide whether to send email notifications.
+    risk_class: operational
+    basis: >
+      Configuration parameter indicating conditional email notification behavior for
+      approval workflow stage.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/opc/src/ejb-jar.xml
+        line_start: 504
+        line_end: 507
+        excerpt: |
+          <env-entry>
+           <env-entry-name>param/SendApprovalMail</env-entry-name>
+           <env-entry-type>java.lang.Boolean</env-entry-type>
+           <env-entry-value>«REDACTED:secret-finding-11»</env-entry-value>
+          </env-entry>
+
+  - record_key: NOTIFICATION-COMPLETED-0001
+    kind: requirement
+    capability_key: notifications
+    requirement: >
+      The system SHOULD send email notifications when orders are completed. GIVEN
+      MailCompletedOrderMDB is enabled and param/SendCompletedOrderMail is true THEN
+      order completion notifications SHALL be sent to customers.
+    confidence: medium
+    confidence_basis: >
+      ejb-jar.xml lines 590-593 define param/SendCompletedOrderMail environment entry
+      (configurable Boolean). MailCompletedOrderMDB processes completed order messages
+      from the InvoiceMDB workflow and conditionally sends notifications.
+    risk_class: operational
+    basis: >
+      Configuration parameter for optional email notification at order completion stage.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/opc/src/ejb-jar.xml
+        line_start: 590
+        line_end: 593
+        excerpt: |
+          <env-entry>
+           <env-entry-name>param/SendCompletedOrderMail</env-entry-name>
+           <env-entry-type>java.lang.Boolean</env-entry-type>
+           <env-entry-value>«REDACTED:secret-finding-13»</env-entry-value>
+          </env-entry>
+
+  - record_key: INTEGRATION-CATALOG-0001
+    kind: integration
+    capability_key: catalog-search
+    requirement: >
+      The system SHALL integrate with an entity catalog service via URL lookup. GIVEN
+      url/EntityCatalogURL resource reference is configured THEN the system SHALL use
+      this URL for XML entity resolution and catalog lookups during message processing.
+    confidence: high
+    confidence_basis: >
+      ejb-jar.xml lines 188-191 define url/EntityCatalogURL resource reference. All
+      message-driven beans declare this resource reference (PurchaseOrderMDB lines 187-191,
+      InvoiceMDB lines 284-287, OrderApprovalMDB lines 384-387, and all Mail MDBs).
+      sun-j2ee-ri.xml line 122 shows the actual URL: http://localhost:8000/opc/EntityCatalog.jsp
+      PurchaseOrderMDB.java line 91 reads this URL for use in entity catalog lookups.
+    risk_class: operational
+    basis: >
+      Both declarative (ejb-jar.xml, sun-j2ee-ri.xml) and programmatic (PurchaseOrderMDB.java)
+      sources document the same integration requirement.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/opc/src/ejb-jar.xml
+        line_start: 187
+        line_end: 191
+        excerpt: |
+          <resource-ref>
+            <res-ref-name>url/EntityCatalogURL</res-ref-name>
+            <res-type>java.net.URL</res-type>
+            <res-auth>Container</res-auth>
+          </resource-ref>
+      - path: legacy-source/petstore1.3.2/src/apps/opc/src/sun-j2ee-ri.xml
+        line_start: 121
+        line_end: 122
+        excerpt: |
+          <resource-ref>
+            <res-ref-name>url/EntityCatalogURL</res-ref-name>
+            <jndi-name>http://localhost:8000/opc/EntityCatalog.jsp</jndi-name>
+
+  - record_key: INTEGRATION-JMS-0001
+    kind: integration
+    capability_key: order-fulfillment
+    requirement: >
+      The system SHALL use JMS queues and topics for asynchronous message-driven
+      order processing. GIVEN configured JMS destinations THEN the system SHALL
+      route messages to: (1) jms/OrderApprovalQueue from order approvals,
+      (2) jms/PurchaseOrderQueue to suppliers, (3) jms/MailQueue for email notifications,
+      (4) InvoiceTopic for supplier invoice broadcasts.
+    confidence: high
+    confidence_basis: >
+      ejb-jar.xml resource-env-ref declarations (lines 192-396) define all five
+      message destinations. sun-j2ee-ri.xml lines 88-231 map these to actual JNDI
+      names showing queue-to-bean bindings. MDB declarations show each bean listens
+      to exactly one destination but may send to multiple queues/topics.
+    risk_class: operational
+    basis: >
+      Declarative messaging infrastructure with explicit destination names and
+      routing mappings across multiple processing stages.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/opc/src/ejb-jar.xml
+        line_start: 192
+        line_end: 396
+        excerpt: |
+          <resource-env-ref>
+            <resource-env-ref-name>jms/OrderApprovalQueue</resource-env-ref-name>
+            <resource-env-ref-type>javax.jms.Queue</resource-env-ref-type>
+          </resource-env-ref>
+          <resource-env-ref>
+            <resource-env-ref-name>jms/CompletedOrderMailQueue</resource-env-ref-name>
+            <resource-env-ref-type>javax.jms.Queue</resource-env-ref-type>
+          </resource-env-ref>
+          <resource-env-ref>
+            <resource-env-ref-name>jms/OrderApprovalMailQueue</resource-env-ref-name>
+            <resource-env-ref-type>javax.jms.Queue</resource-env-ref-type>
+          </resource-env-ref>
+          <resource-env-ref>
+            <resource-env-ref-name>jms/PurchaseOrderQueue</resource-env-ref-name>
+            <resource-env-ref-type>javax.jms.Queue</resource-env-ref-type>
+          </resource-env-ref>
+
+findings:
+  - kind: ambiguity
+    path: legacy-source/petstore1.3.2/src/apps/opc/src/ejb-jar.xml
+    description: >
+      The OrderApprovalTD (transition delegate) class name is configured in ejb-jar.xml
+      line 318-321 as param/transitiondelegate/OrderApprovalTD with redacted value.
+      It is unclear whether this is a code reference or a configuration value. The
+      transition delegate pattern is used but its factory/loading mechanism is not
+      documented in the visible source, making it impossible to verify the exact class
+      resolution strategy without seeing the framework code.
+
+  - kind: unparseable
+    path: legacy-source/petstore1.3.2/src/apps/opc/src/com/sun/j2ee/blueprints/opc/ejb/OrderApprovalMDB.java
+    description: >
+      The onMessage() method implementation for OrderApprovalMDB is declared but not
+      visible in the read window (line 100 is the read limit). The actual business
+      logic for processing order approvals—including how approved orders are routed
+      to suppliers and how approvals are sent to customer relations—cannot be determined
+      from the visible code. The file requires a deeper read to extract workflow
+      details.
+
+  - kind: conflict
+    path: legacy-source/petstore1.3.2/src/apps/opc/src/sun-j2ee-ri.xml
+    description: >
+      Multiple redacted password values (lines 117, 166, 215, 264, 310, 356, 515, 799)
+      prevent verification of whether different MDBs use the same or different credentials
+      for resource access. This may indicate a security-sensitive configuration decision
+      (credential isolation between components) that cannot be verified without access
+      to the actual values.
+
+  - kind: unparseable
+    path: legacy-source/petstore1.3.2/src/apps/opc/src/com/sun/j2ee/blueprints/opc/admin/ejb/OPCAdminFacadeEJB.java
+    description: >
+      The OPCAdminFacadeEJB implementation is truncated at line 150. The complete
+      method implementations for getChartInfo() and any other admin queries are not
+      visible. Chart generation logic, date range filtering, and aggregation rules
+      cannot be determined from visible code.
+
+  - kind: ambiguity
+    path: legacy-source/petstore1.3.2/src/apps/opc/src/ejb-jar.xml
+    description: >
+      MailInvoiceMDB and InvoiceMDB both listen to the same InvoiceTopic (lines 210,
+      411). Topic-based pub/sub means both will receive the same invoice events. The
+      responsibility partition between these two beans is unclear: does InvoiceMDB handle
+      order status updates while MailInvoiceMDB only sends confirmations, or is there
+      different routing logic? The onMessage() implementations would clarify this.
+
+stack_metadata:
+  framework: jee-ejb2
+  ejb.beans_count: 7
+  ejb.mdb_count: 5
+  ejb.session_count: 1
+  jms.queues: 5
+  jms.topics: 1
+  database.tables: 7
