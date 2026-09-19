@@ -1,0 +1,448 @@
+records:
+  - record_key: ORDER-AUTO-APPROVE-0001
+    kind: business-rule
+    capability_key: order-approval
+    requirement: >
+      The system SHALL automatically approve purchase orders below a locale-specific
+      threshold. GIVEN a purchase order is received and processed by PurchaseOrderMDB
+      AND the total price is below the locale threshold THEN the order SHALL be
+      automatically approved and transitioned to OrderApprovalMDB without requiring
+      administrative intervention. Thresholds are: USD 500 for US locale, ¥50000
+      for Japan locale.
+    confidence: high
+    confidence_basis: >
+      PurchaseOrderMDB.java lines 183-191 show explicit logic in canIApprove() method
+      comparing getTotalPrice() against hardcoded locale-specific thresholds. Method
+      is called in doWork() at line 158 and controls whether automatic approval XML
+      is generated. Logic is implemented in both declarative (workflow) and programmatic
+      (Java) layers.
+    risk_class: operational
+    basis: >
+      Programmatic implementation in PurchaseOrderMDB with hardcoded thresholds.
+      Values are bare literals with no external configuration or comment explaining
+      the business rationale.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/opc/src/com/sun/j2ee/blueprints/opc/ejb/PurchaseOrderMDB.java
+        line_start: 183
+        line_end: 191
+        excerpt: |
+          private boolean canIApprove(PurchaseOrder purchaseOrder) {
+            Locale locale = purchaseOrder.getLocale();
+            if (locale.equals(Locale.US)) {
+              if (purchaseOrder.getTotalPrice() < 500) return true;
+            } else if (locale.equals(Locale.JAPAN))  {
+              if (purchaseOrder.getTotalPrice() < 50000) return true;
+            }
+            return false;
+          }
+
+  - record_key: ANALYTICS-REVENUE-CALC-0001
+    kind: business-rule
+    capability_key: admin-operations
+    requirement: >
+      The system SHALL calculate order revenue using the formula: quantity * unitPrice,
+      aggregated by category or item. GIVEN getChartInfo request type is "REVENUE" AND
+      category is null THEN sum all line item revenues grouped by categoryId ELSE IF
+      category is specified group by itemId within that category only.
+    confidence: high
+    confidence_basis: >
+      OPCAdminFacadeEJB.java lines 193-217 show complete implementation of revenue
+      calculation. Explicit conditional on request.equals("REVENUE") at line 193,
+      category null check at line 194, and quantity*unitPrice calculation at lines
+      200, 212, 215. Accumulation logic with HashMap containsKey checks shows
+      aggregation by category or item.
+    risk_class: operational
+    basis: >
+      Full method implementation visible showing revenue aggregation logic and
+      category-based filtering.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/opc/src/com/sun/j2ee/blueprints/opc/admin/ejb/OPCAdminFacadeEJB.java
+        line_start: 193
+        line_end: 217
+        excerpt: |
+          if(request.equals("REVENUE")) {
+            if(categ == null) {
+              id = loc.getCategoryId();
+              if(chartDetails.containsKey(id)) {
+                tmpValue = (Float) chartDetails.get(id);
+                chartDetails.put(id,
+                     new Float(tmpValue.floatValue() +
+                     (loc.getQuantity()*loc.getUnitPrice())));
+              } else {
+                chartDetails.put(id, new Float((loc.getQuantity()*
+                                        loc.getUnitPrice())));
+              }
+            } else {
+              if(loc.getCategoryId().equals(categ)) {
+                id = loc.getItemId();
+
+  - record_key: ANALYTICS-QUANTITY-CALC-0001
+    kind: business-rule
+    capability_key: admin-operations
+    requirement: >
+      The system SHALL calculate order quantities, summing line item quantities
+      aggregated by category or item. GIVEN getChartInfo request type is not "REVENUE"
+      (default orders report) AND category is null THEN sum all quantities grouped
+      by categoryId ELSE IF category is specified group by itemId within that category.
+    confidence: high
+    confidence_basis: >
+      OPCAdminFacadeEJB.java lines 219-243 show complete implementation mirroring
+      revenue calculation but using loc.getQuantity() directly instead of
+      quantity*unitPrice. Same category-based grouping logic with HashMap accumulation.
+    risk_class: operational
+    basis: >
+      Full method implementation showing quantity aggregation distinct from revenue
+      path.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/opc/src/com/sun/j2ee/blueprints/opc/admin/ejb/OPCAdminFacadeEJB.java
+        line_start: 219
+        line_end: 243
+        excerpt: |
+          } else {
+            if(categ == null) {
+              id = loc.getCategoryId();
+              if(chartDetails.containsKey(id)) {
+                tmpQty = (Integer) chartDetails.get(id);
+                chartDetails.put(id,
+                     new Integer(tmpQty.intValue() +
+                                 loc.getQuantity()));
+              } else {
+                chartDetails.put(id, new
+                                 Integer(loc.getQuantity()));
+
+  - record_key: MAIL-INVOICE-CONDITIONAL-0001
+    kind: business-rule
+    capability_key: notifications
+    requirement: >
+      The system SHALL conditionally send invoice confirmations based on
+      param/SendConfirmationMail configuration. GIVEN MailInvoiceMDB receives an
+      invoice message AND param/SendConfirmationMail is false THEN no email confirmation
+      SHALL be sent (onMessage method returns without processing). GIVEN configuration
+      is true THEN invoice confirmation SHALL be sent.
+    confidence: high
+    confidence_basis: >
+      MailInvoiceMDB.java lines 127-130 show explicit conditional guard in onMessage()
+      method: "if (sendConfirmationMail)" wraps all processing. sendConfirmationMail
+      is retrieved in ejbCreate() line 97 from configuration parameter
+      JNDINames.SEND_CONFIRMATION_MAIL, making this a configurable deployment-time
+      behavior.
+    risk_class: operational
+    basis: >
+      Configuration parameter read at bean initialization and used as guard condition
+      in message processing.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/opc/src/com/sun/j2ee/blueprints/opc/customerrelations/ejb/MailInvoiceMDB.java
+        line_start: 94
+        line_end: 104
+        excerpt: |
+          public void ejbCreate() {
+            try {
+              ServiceLocator serviceLocator   = new ServiceLocator();
+              sendConfirmationMail = serviceLocator.getBoolean(JNDINames.SEND_CONFIRMATION_MAIL);
+      - path: legacy-source/petstore1.3.2/src/apps/opc/src/com/sun/j2ee/blueprints/opc/customerrelations/ejb/MailInvoiceMDB.java
+        line_start: 121
+        line_end: 130
+        excerpt: |
+          public void onMessage(Message recvMsg) {
+            TextMessage recdTM = null;
+            String recdText = null;
+            try {
+              recdTM = (TextMessage)recvMsg;
+              recdText = recdTM.getText();
+              if (sendConfirmationMail) {
+                    String xmlMail = doWork(recdText);
+                doTransition(xmlMail);
+
+  - record_key: MAIL-INVOICE-SUBJECT-0001
+    kind: requirement
+    capability_key: notifications
+    requirement: >
+      Invoice confirmation emails SHALL use subject line prefix "Java Pet Store Order
+      Shipped: " concatenated with order identifiers.
+    confidence: medium
+    confidence_basis: >
+      MailInvoiceMDB.java line 79 defines static constant MAIL_SUBJECT = "Java Pet Store
+      Order Shipped: ". Constant is declared but usage in email composition is not visible
+      in the read window (MailContentXDE.doWork would append order details).
+    risk_class: presentational
+    basis: >
+      Subject line constant defined in mail generation MDB. Actual email construction
+      logic not visible in source excerpt.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/opc/src/com/sun/j2ee/blueprints/opc/customerrelations/ejb/MailInvoiceMDB.java
+        line_start: 79
+        line_end: 81
+        excerpt: |
+          private static final String MAIL_SUBJECT = "Java Pet Store Order Shipped: ";
+          private static final String INVOICE_STYLE_SHEET = "/com/sun/j2ee/blueprints/opc/rsrc/xsl/PartialInvoice.xsl";
+
+  - record_key: ORDER-APPROVAL-VALIDATION-0001
+    kind: business-rule
+    capability_key: order-approval
+    requirement: >
+      The system MAY validate OrderApproval XML documents. GIVEN
+      param/xml/validation/OrderApproval configuration is true THEN OrderApproval
+      XML SHALL be validated before processing. Additionally, XSD validation MAY be
+      performed GIVEN param/xml/XSDValidation is true.
+    confidence: medium
+    confidence_basis: >
+      ejb-jar.xml lines 307-316 define two separate environment entries for
+      OrderApproval validation and XSD validation (same pattern as Invoice validation).
+      OrderApprovalMDB.java line 121-122 retrieves validateXmlOrderApproval and passes
+      it to processing, and line 127 creates TPASupplierOrderXDE with XSD validation
+      flag. Redacted values prevent determining default state.
+    risk_class: operational
+    basis: >
+      Declarative configuration entries paired with programmatic usage in bean.
+      Two-level validation pattern (basic XML + XSD) mirrors Invoice MDB design.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/opc/src/ejb-jar.xml
+        line_start: 307
+        line_end: 316
+        excerpt: |
+          <env-entry>
+           <env-entry-name>param/xml/validation/OrderApproval</env-entry-name>
+           <env-entry-type>java.lang.Boolean</env-entry-type>
+           <env-entry-value>«REDACTED:secret-finding-5»</env-entry-value>
+          </env-entry>
+          <env-entry>
+           <env-entry-name>param/xml/XSDValidation</env-entry-name>
+           <env-entry-type>java.lang.Boolean</env-entry-type>
+           <env-entry-value>«REDACTED:secret-finding-6»</env-entry-value>
+          </env-entry>
+
+  - record_key: MAIL-ORDER-APPROVAL-CONDITIONAL-0001
+    kind: business-rule
+    capability_key: notifications
+    requirement: >
+      The system SHALL conditionally send order approval notifications based on
+      param/SendApprovalMail configuration. GIVEN MailOrderApprovalMDB processes an
+      approval message AND param/SendApprovalMail is false THEN no approval notification
+      email SHALL be sent. GIVEN configuration is true THEN approval notification SHALL
+      be sent.
+    confidence: medium
+    confidence_basis: >
+      ejb-jar.xml lines 504-507 declare param/SendApprovalMail environment entry
+      (Boolean, redacted value). MailOrderApprovalMDB reads this configuration during
+      initialization. Conditional guard pattern is consistent with MailInvoiceMDB,
+      though MailOrderApprovalMDB source excerpt does not show onMessage implementation.
+    risk_class: operational
+    basis: >
+      Configuration parameter pattern in ejb-jar.xml matches MailInvoiceMDB implementation
+      pattern.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/opc/src/ejb-jar.xml
+        line_start: 504
+        line_end: 507
+        excerpt: |
+          <env-entry>
+           <env-entry-name>param/SendApprovalMail</env-entry-name>
+           <env-entry-type>java.lang.Boolean</env-entry-type>
+           <env-entry-value>«REDACTED:secret-finding-11»</env-entry-value>
+          </env-entry>
+
+  - record_key: MAIL-COMPLETED-ORDER-CONDITIONAL-0001
+    kind: business-rule
+    capability_key: notifications
+    requirement: >
+      The system SHALL conditionally send order completion notifications based on
+      param/SendCompletedOrderMail configuration. GIVEN MailCompletedOrderMDB processes
+      a completed order message AND param/SendCompletedOrderMail is false THEN no
+      completion notification email SHALL be sent. GIVEN configuration is true THEN
+      completion notification SHALL be sent.
+    confidence: medium
+    confidence_basis: >
+      ejb-jar.xml lines 590-593 declare param/SendCompletedOrderMail environment entry
+      (Boolean, redacted value). Pattern is consistent with other Mail MDB conditional
+      configurations. MailCompletedOrderMDB.java reads configuration but implementation
+      excerpt not visible.
+    risk_class: operational
+    basis: >
+      Configuration parameter pattern defined in deployment descriptor, consistent
+      across all Mail MDB beans.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/opc/src/ejb-jar.xml
+        line_start: 590
+        line_end: 593
+        excerpt: |
+          <env-entry>
+           <env-entry-name>param/SendCompletedOrderMail</env-entry-name>
+           <env-entry-type>java.lang.Boolean</env-entry-type>
+           <env-entry-value>«REDACTED:secret-finding-13»</env-entry-value>
+          </env-entry>
+
+  - record_key: TRANSITION-DELEGATE-PATTERN-0001
+    kind: requirement
+    capability_key: order-fulfillment
+    requirement: >
+      The system SHALL use pluggable TransitionDelegate pattern to implement workflow
+      transitions between MDB processing stages. GIVEN a message-driven bean completes
+      its work THEN it instantiates a TransitionDelegate, calls setup() to initialize
+      JMS resources, and calls doTransition(TransitionInfo) to route the message to
+      the next queue/topic. Each bean may use either a statically bound delegate class
+      (PurchaseOrderMDB->PurchaseOrderTD, InvoiceMDB->InvoiceTD) or a factory-loaded
+      delegate (OrderApprovalMDB via TransitionDelegateFactory).
+    confidence: high
+    confidence_basis: >
+      PurchaseOrderMDB.java lines 75, 93-94 show static instantiation of PurchaseOrderTD
+      and setup() call. Lines 171-175 show doTransition() invocation with TransitionInfo.
+      OrderApprovalMDB.java lines 122-125 show factory pattern with TransitionDelegateFactory
+      and dynamic class loading. InvoiceMDB.java lines 95-96 show static InvoiceTD
+      instantiation. PurchaseOrderTD.java lines 52-87 show complete TransitionDelegate
+      implementation with JMS resource management and message sending via QueueHelper.
+    risk_class: operational
+    basis: >
+      Multiple independent implementations across different MDBs showing consistent
+      TransitionDelegate usage pattern.
+    stack_metadata:
+      design_pattern: strategy-pattern
+      pluggable_delegates: "PurchaseOrderTD, InvoiceTD, OrderApprovalTD, MailInvoiceTransitionDelegate, MailOrderApprovalTransitionDelegate, MailCompletedOrderTD"
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/opc/src/com/sun/j2ee/blueprints/opc/ejb/PurchaseOrderMDB.java
+        line_start: 75
+        line_end: 94
+        excerpt: |
+          private TransitionDelegate transitionDelegate;
+          ...
+          public void ejbCreate() {
+            try {
+              ...
+              transitionDelegate = new PurchaseOrderTD();
+              transitionDelegate.setup();
+      - path: legacy-source/petstore1.3.2/src/apps/opc/src/com/sun/j2ee/blueprints/opc/ejb/OrderApprovalMDB.java
+        line_start: 122
+        line_end: 125
+        excerpt: |
+              String tdClassName = serviceLocator.getString(JNDINames.TRANSITION_DELEGATE_ORDER_APPROVAL);
+              TransitionDelegateFactory tdf = new TransitionDelegateFactory();
+              transitionDelegate = tdf.getTransitionDelegate(tdClassName);
+              transitionDelegate.setup();
+      - path: legacy-source/petstore1.3.2/src/apps/opc/src/com/sun/j2ee/blueprints/opc/transitions/PurchaseOrderTD.java
+        line_start: 73
+        line_end: 87
+        excerpt: |
+          public void doTransition(TransitionInfo info) throws TransitionException {
+            String xmlOrderApproval = info.getXMLMessage();
+            try {
+              if (xmlOrderApproval != null) {
+                queueHelper.sendMessage(xmlOrderApproval);
+              }
+            } catch (JMSException je) {
+                throw new TransitionException(je);
+            }
+          }
+
+  - record_key: DATE-FORMATTING-LOGIC-0001
+    kind: business-rule
+    capability_key: admin-operations
+    requirement: >
+      The system SHALL format purchase order dates as MM/DD/YYYY in getOrdersByStatus
+      response. The date components are calculated as: month = (gotDate.getMonth()+1),
+      day = gotDate.getDate(), year = (gotDate.getYear()+1900), concatenated with "/"
+      separators.
+    confidence: high
+    confidence_basis: >
+      OPCAdminFacadeEJB.java lines 144-146 show explicit date formatting logic using
+      Java Date deprecated methods. The +1 offset for month (to convert 0-based month
+      to 1-based) and +1900 offset for year (to convert years-since-1900 to absolute
+      year) are bare literals with no comment explaining the Date API quirks being
+      worked around.
+    risk_class: operational
+    basis: >
+      Direct implementation of date formatting in getOrdersByStatus method. Hardcoded
+      offsets suggest compatibility with Java Date class legacy behavior.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/opc/src/com/sun/j2ee/blueprints/opc/admin/ejb/OPCAdminFacadeEJB.java
+        line_start: 144
+        line_end: 148
+        excerpt: |
+                Date gotDate = new Date(po.getPoDate());
+                String podate = (gotDate.getMonth()+1) + "/" +
+                    gotDate.getDate() + "/" + (gotDate.getYear()+1900);
+                retVal.add(new OrderDetails(po.getPoId(), po.getPoUserId(),
+                                            podate, po.getPoValue(), status));
+
+  - record_key: INVOICE-TOPIC-SUBSCRIPTION-0001
+    kind: requirement
+    capability_key: order-fulfillment
+    requirement: >
+      The system SHALL publish invoices to a JMS Topic (not a Queue) to enable multiple
+      independent subscribers. Both InvoiceMDB and MailInvoiceMDB SHALL subscribe to
+      the same InvoiceTopic. InvoiceMDB updates purchase order status based on invoice
+      data; MailInvoiceMDB generates customer notification emails independently using
+      the same invoice event.
+    confidence: high
+    confidence_basis: >
+      ejb-jar.xml lines 210, 412 show both InvoiceMDB and MailInvoiceMDB declared with
+      message-driven-destination type javax.jms.Topic (not Queue). sun-j2ee-ri.xml lines
+      137, 178 map both beans to same topic destination: InvoiceMDB to
+      jms/opc/InvoiceTopic and MailInvoiceMDB also to Topic-based connection. This
+      pub/sub pattern allows decoupled processing of invoice events.
+    risk_class: operational
+    basis: >
+      Declarative Topic configuration in ejb-jar.xml and sun-j2ee-ri.xml deployment
+      descriptors confirming pub/sub architecture for invoice events.
+    traces:
+      - path: legacy-source/petstore1.3.2/src/apps/opc/src/ejb-jar.xml
+        line_start: 209
+        line_end: 211
+        excerpt: |
+          <message-driven-destination>
+            <destination-type>javax.jms.Topic</destination-type>
+          </message-driven-destination>
+      - path: legacy-source/petstore1.3.2/src/apps/opc/src/sun-j2ee-ri.xml
+        line_start: 136
+        line_end: 137
+        excerpt: |
+          <ejb-name>InvoiceMDB</ejb-name>
+          <jndi-name>jms/opc/InvoiceTopic</jndi-name>
+
+findings:
+  - kind: ambiguity
+    path: legacy-source/petstore1.3.2/src/apps/opc/src/com/sun/j2ee/blueprints/opc/ejb/PurchaseOrderMDB.java
+    description: >
+      The auto-approval thresholds (500 for US, 50000 for Japan) are hardcoded bare
+      literals in the canIApprove() method with no configuration mechanism, external
+      documentation, or test coverage visible. It is unclear whether these thresholds
+      are: (1) pegged to specific currency values (USD vs JPY), (2) configurable at
+      runtime via environment entries, or (3) enforced by any other business rules
+      (e.g., risk management, regulatory limits). No JNDI lookup or configuration
+      entry exists for these thresholds in ejb-jar.xml.
+
+  - kind: conflict
+    path: legacy-source/petstore1.3.2/src/apps/opc/src/com/sun/j2ee/blueprints/opc/admin/ejb/OPCAdminFacadeEJB.java
+    description: >
+      Date formatting uses deprecated Java Date methods (getMonth(), getYear(),
+      getDate()) with manual offset calculations. The transformation from po.getPoDate()
+      (LONGINT from database) to java.util.Date constructor to string formatting is
+      unclear whether po.getPoDate() returns milliseconds since epoch (expected by
+      Date constructor) or some other time representation. If po.getPoDate() returns
+      milliseconds, date formatting will be correct; if it returns seconds or another
+      unit, the formatting will be silently wrong.
+
+  - kind: unparseable
+    path: legacy-source/petstore1.3.2/src/apps/opc/src/com/sun/j2ee/blueprints/opc/transitions
+    description: >
+      Several Mail transition delegates exist (MailInvoiceTransitionDelegate,
+      MailOrderApprovalTransitionDelegate, MailCompletedOrderTD) but their source code
+      is not visible in read window. It is unclear what messages they send, which queues
+      they target, or whether they perform additional validation/transformation.
+      MailInvoiceMDB line 102 instantiates MailInvoiceTransitionDelegate but its
+      doTransition() implementation is not visible.
+
+  - kind: ambiguity
+    path: legacy-source/petstore1.3.2/src/apps/opc/src/ejb-jar.xml
+    description: >
+      MailInvoiceMDB and MailOrderApprovalMDB both listen to their respective queues
+      (jms/MailQueue) but the queue destination name is the same for both beans. It is
+      unclear whether they share a single queue and use message selectors/properties to
+      differentiate message types, or whether the sun-j2ee-ri.xml deployment maps these
+      to separate physical queues at runtime. Reachability and routing logic cannot be
+      determined from ejb-jar.xml alone.
+
+stack_metadata:
+  framework: jee-ejb2
+  extraction_scope: complete workflow analysis + admin operations
+  new_findings_from_pass_b: "auto-approval thresholds, revenue calculation detail, conditional mail logic, transition delegate pattern, date formatting logic, topic subscription pattern"
+  agreements_with_pass_a: "workflow structure, transaction semantics, access control, JMS integration, validation configuration"
+  contradictions_with_pass_a: none
